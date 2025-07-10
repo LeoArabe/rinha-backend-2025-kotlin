@@ -1,49 +1,48 @@
-version: "3.5"
-
 services:
-  api01: # Primeira instância da API
+  api01:
     image: leoarabe/rinha-backend-2025-kotlin
     hostname: api01
     restart: always
     networks:
       - rinha
     depends_on:
-      - mongo
-    deploy:
-      resources:
-        limits:
-          cpus: '0.25'
-          memory: 100MB
+      mongo:
+        condition: service_healthy
+    environment:
+      - SPRING_DATA_MONGODB_URI=mongodb://mongo:27017/rinhaDB
 
-  api02: # Segunda instância da API
+  api02:
     image: leoarabe/rinha-backend-2025-kotlin
     hostname: api02
     restart: always
     networks:
       - rinha
     depends_on:
-      - mongo
-    deploy:
-      resources:
-        limits:
-          cpus: '0.25'
-          memory: 100MB
+      mongo:
+        condition: service_healthy
+    environment:
+      - SPRING_DATA_MONGODB_URI=mongodb://mongo:27017/rinhaDB
 
-  mongo: # MongoDB como banco de dados
+  mongo:
     image: mongo:6.0
+    container_name: mongo
+    ports:
+      - "27017:27017"
     hostname: mongo
     restart: always
     volumes:
       - ./data:/data/db
     networks:
       - rinha
-    deploy:
-      resources:
-        limits:
-          cpus: '0.25'
-          memory: 100MB
+    healthcheck:
+      test: [ "CMD", "mongosh", "--eval", "db.runCommand('ping').ok" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
-  nginx: # Load Balancer que expõe a porta 9999
+
+  nginx:
     image: nginx:latest
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
@@ -54,12 +53,7 @@ services:
       - api02
     networks:
       - rinha
-    deploy:
-      resources:
-        limits:
-          cpus: '0.25'
-          memory: 100MB
 
 networks:
   rinha:
-    external: true
+    driver: bridge

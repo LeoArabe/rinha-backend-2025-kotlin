@@ -3,7 +3,7 @@ FROM gradle:8.4.0-jdk17 AS builder
 WORKDIR /app
 COPY . .
 
-RUN gradle bootJar --no-daemon
+RUN gradle clean bootJar --no-daemon
 
 FROM eclipse-temurin:17-jre-alpine
 
