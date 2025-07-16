@@ -8,5 +8,6 @@ data class Cliente(
     @Id val id: String? = null,
     val nome: String,
     val saldo: Int = 0,
+    val limite: Int = 0,
     val transacoes: List<Transacao> = emptyList()
 )

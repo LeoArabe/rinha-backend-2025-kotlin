@@ -1,8 +1,9 @@
 package com.estagiario.gobots.rinha_backend.infraestructure.incoming
 
-import com.estagiario.gobots.rinha_backend.application.service.ClienteService
+import com.estagiario.gobots.rinha_backend.application.ClienteService
 import com.estagiario.gobots.rinha_backend.domain.model.Cliente
 import com.estagiario.gobots.rinha_backend.domain.model.Transacao
+import com.estagiario.gobots.rinha_backend.domain.model.dto.TransacaoRequest
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
@@ -28,13 +29,14 @@ class ClienteController(
     @PostMapping("/{id}/transacoes")
     fun transacao(
         @PathVariable id: String,
-        @RequestBody transacaoReq: TransacaoRequest): Mono<Cliente> {
-       val transacao = Transacao(
-           valor = transacaoReq.valor,
-           tipo = transacaoReq.tipo,
-           descricao = transacaoReq.descricao,
-           realizadaEm = ""
-       )
+        @RequestBody transacaoReq: TransacaoRequest
+    ): Mono<Cliente> {
+        val transacao = Transacao(
+            valor = transacaoReq.valor,
+            tipo = transacaoReq.tipo,
+            descricao = transacaoReq.descricao,
+            realizadaEm = ""
+        )
         return service.registrarTransacao(id, transacao)
     }
 }

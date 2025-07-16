@@ -9,11 +9,10 @@ import reactor.core.publisher.Flux
 
 @Configuration
 class StartupInitializer {
-
     @Bean
     fun preloadClientes(repository: ClienteRepository): ApplicationRunner = ApplicationRunner {
         repository.count()
-            .filter { it == 0L } // só insere se ainda não houver clientes
+            .filter { it == 0L }
             .flatMapMany {
                 Flux.just(
                     Cliente("1", "Cliente 1", limite = 100_000, saldo = 0),
@@ -24,7 +23,7 @@ class StartupInitializer {
                 )
             }
             .flatMap(repository::save)
-            .doOnNext { println("Cliente pré-carregado: ${it.nome}") }
+            .doOnNext { println("[Startup] Cliente pré-carregado: ${it.id} - ${it.nome}") }
             .subscribe()
     }
 }

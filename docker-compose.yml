@@ -29,7 +29,6 @@ services:
     ports:
       - "27017:27017"
     hostname: mongo
-    restart: always
     volumes:
       - ./data:/data/db
     networks:

@@ -1,2 +1,12 @@
-spring.data.mongodb.uri=mongodb://${MONGO_HOST}:27017/rinhaDB
+spring:
+  application:
+    name: rinha-backend
+  server:
+    forward-headers-strategy: native
+  data:
+    mongodb:
+      uri: mongodb://mongo:27017/rinhaDB
 
+logging:
+  level:
+    org.springframework.web: DEBUG
