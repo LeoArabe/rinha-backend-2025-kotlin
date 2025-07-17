@@ -10,6 +10,11 @@ services:
         condition: service_healthy
     environment:
       - SPRING_DATA_MONGODB_URI=mongodb://mongo:27017/rinhaDB
+    deploy:
+      resources:
+        limits:
+          cpus: "0.4"
+          memory: "150M"
 
   api02:
     image: leoarabe/rinha-backend-2025-kotlin
@@ -22,6 +27,11 @@ services:
         condition: service_healthy
     environment:
       - SPRING_DATA_MONGODB_URI=mongodb://mongo:27017/rinhaDB
+    deploy:
+      resources:
+        limits:
+          cpus: "0.4"
+          memory: "150M"
 
   mongo:
     image: mongo:6.0
@@ -39,6 +49,11 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.4"
+          memory: "200M"
 
 
   nginx:
@@ -52,6 +67,11 @@ services:
       - api02
     networks:
       - rinha
+    deploy:
+      resources:
+        limits:
+          cpus: "0.3"
+          memory: "50M"
 
 networks:
   rinha:

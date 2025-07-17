@@ -17,11 +17,6 @@ import reactor.core.publisher.Mono
 class ClienteController(
     private val service: ClienteService
 ) {
-
-    @PostMapping
-    fun criarCliente(@RequestBody cliente: Cliente): Mono<Cliente> =
-        service.criarCliente(cliente)
-
     @GetMapping("/{id}/extrato")
     fun extrato(@PathVariable id: String): Mono<Cliente> =
         service.buscarExtrato(id)

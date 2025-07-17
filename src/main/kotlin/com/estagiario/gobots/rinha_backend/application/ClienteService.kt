@@ -14,10 +14,6 @@ class ClienteService(
     private val repository: ClienteRepository
 ) {
 
-    fun criarCliente(cliente: Cliente): Mono<Cliente> {
-        return repository.save(cliente)
-    }
-
     fun buscarExtrato(id: String): Mono<Cliente> {
         return repository.findById(id)
     }
