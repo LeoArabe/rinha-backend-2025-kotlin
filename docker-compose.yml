@@ -1,78 +1,111 @@
 services:
-  api01:
-    image: leoarabe/rinha-backend-2025-kotlin
+  api01: &api
+    build: .
     hostname: api01
+    environment:
+      - SPRING_PROFILES_ACTIVE=prod
+      - APP_PORT=8080
+      - SPRING_DATA_MONGODB_URI=mongodb://mongo:27017/rinhaDB
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - PROCESSOR_DEFAULT_URL=http://payment-processor-default:8080
+      - PROCESSOR_FALLBACK_URL=http://payment-processor-fallback:8080
+      - INSTANCE_ID=API-1
+      - WORKER_CONCURRENCY=16
     restart: always
     networks:
       - rinha
+      - payment-processor
     depends_on:
       mongo:
         condition: service_healthy
-    environment:
-      - SPRING_DATA_MONGODB_URI=mongodb://mongo:27017/rinhaDB
+      redis:
+        condition: service_healthy
     deploy:
       resources:
         limits:
-          cpus: "0.4"
-          memory: "150M"
+          cpus: "0.25"
+          memory: "70M"
 
   api02:
-    image: leoarabe/rinha-backend-2025-kotlin
+    <<: *api
     hostname: api02
-    restart: always
+    environment:
+      - INSTANCE_ID=API-2
+
+  nginx:
+    image: nginx:alpine
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "9999:9999"
+    depends_on:
+      api01:
+        condition: service_healthy
+      api02:
+        condition: service_healthy
     networks:
       - rinha
-    depends_on:
-      mongo:
-        condition: service_healthy
-    environment:
-      - SPRING_DATA_MONGODB_URI=mongodb://mongo:27017/rinhaDB
     deploy:
       resources:
         limits:
-          cpus: "0.4"
-          memory: "150M"
+          cpus: "0.1"
+          memory: "20M"
 
   mongo:
     image: mongo:6.0
     container_name: mongo
-    ports:
-      - "27017:27017"
     hostname: mongo
+    environment:
+      - MONGO_INITDB_DATABASE=rinhaDB
     volumes:
-      - ./data:/data/db
+      - mongo_data:/data/db
     networks:
       - rinha
     healthcheck:
-      test: [ "CMD", "mongosh", "--eval", "db.runCommand('ping').ok" ]
+      test: ["CMD", "mongosh", "--eval", "db.runCommand('ping').ok"]
       interval: 10s
       timeout: 5s
+      retries: 5
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: "100M"
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    hostname: redis
+    command: >
+      redis-server
+      --maxmemory 80mb # AJUSTADO
+      --maxmemory-policy allkeys-lru
+      --save ""
+      --appendonly no
+      --tcp-keepalive 60
+    networks:
+      - rinha
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
       retries: 5
       start_period: 10s
     deploy:
       resources:
         limits:
           cpus: "0.4"
-          memory: "200M"
+          memory: "90M"
 
-
-  nginx:
-    image: nginx:latest
-    volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf:ro
-    ports:
-      - "9999:9999"
-    depends_on:
-      - api01
-      - api02
-    networks:
-      - rinha
-    deploy:
-      resources:
-        limits:
-          cpus: "0.3"
-          memory: "50M"
+volumes:
+  mongo_data:
+    driver: local
 
 networks:
   rinha:
     driver: bridge
+  payment-processor:
+    name: payment-processor
+    external: true
