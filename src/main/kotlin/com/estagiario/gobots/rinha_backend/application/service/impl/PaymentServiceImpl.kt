@@ -6,7 +6,10 @@ import com.estagiario.gobots.rinha_backend.infrastructure.incoming.dto.PaymentRe
 import com.estagiario.gobots.rinha_backend.infrastructure.outgoing.repository.PaymentEventRepository
 import com.estagiario.gobots.rinha_backend.infrastructure.outgoing.repository.PaymentRepository
 import kotlinx.coroutines.reactor.awaitSingleOrNull
+import kotlinx.coroutines.reactor.mono
+import org.springframework.dao.DuplicateKeyException
 import org.springframework.stereotype.Service
+import org.springframework.transaction.ReactiveTransaction
 import org.springframework.transaction.reactive.TransactionalOperator
 import org.springframework.transaction.reactive.executeAndAwait
 
@@ -18,19 +21,19 @@ class PaymentServiceImpl(
 ) : PaymentService {
 
     override suspend fun processNewPayment(request: PaymentRequest) {
-        // A DuplicateKeyException será lançada daqui e tratada pelo ControllerAdvice.
-        // Outras exceções são encapsuladas para tratamento genérico de erro 500.
         try {
             transactionalOperator.executeAndAwait {
                 val payment = request.toDomainEntity()
-                paymentRepository.save(payment).awaitSingleOrNull()
+                // CORREÇÃO: Removido o .awaitSingleOrNull()
+                paymentRepository.save(payment)
 
-                val paymentEvent = PaymentEvent.newProcessPaymentEvent(payment.correlationId)
-                paymentEventRepository.save(paymentEvent).awaitSingleOrNull()
+                val paymentEvent = PaymentEvent.newProcessPayment - PaymentEvent(payment.correlationId)
+                // CORREÇÃO: Removido o .awaitSingleOrNull()
+                paymentEventRepository.save(paymentEvent)
             }
         } catch (e: Exception) {
-            if (e is org.springframework.dao.DuplicateKeyException) {
-                throw e // Deixa a exceção de duplicidade subir para o handler global
+            if (e is DuplicateKeyException) {
+                throw e
             }
             throw PaymentProcessingException("Falha ao persistir intenção de pagamento ${request.correlationId}", e)
         }
@@ -39,8 +42,8 @@ class PaymentServiceImpl(
 
 // Extension function para facilitar o uso de transações com coroutines
 suspend inline fun <T> TransactionalOperator.executeAndAwait(
-    crossinline action: suspend (org.springframework.transaction.ReactiveTransaction) -> T?
-): T? = execute { trx -> kotlinx.coroutines.reactor.mono { action(trx) } }.awaitSingleOrNull()
+    crossinline action: suspend (ReactiveTransaction) -> T?
+): T? = execute { trx -> mono { action(trx) } }.awaitSingleOrNull()
 
 // Exceção customizada
 class PaymentProcessingException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)

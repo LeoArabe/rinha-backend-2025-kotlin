@@ -67,7 +67,6 @@ class SummaryServiceImpl(
         val groupStage = Aggregation.group("processorUsed")
             .count().`as`("totalRequests")
             .sum("amount").`as`("totalAmount")
-
         val projectStage = Aggregation.project()
             .and("_id").`as`("processorUsed")
             .and("totalRequests").`as`("totalRequests")

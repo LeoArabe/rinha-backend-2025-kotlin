@@ -2,7 +2,6 @@ package com.estagiario.gobots.rinha_backend.infrastructure.incoming.handler
 
 import com.estagiario.gobots.rinha_backend.application.service.impl.InvalidDateRangeException
 import com.estagiario.gobots.rinha_backend.application.service.impl.PaymentProcessingException
-import com.estagiario.gobots.rinha_backend.infrastructure.incoming.dto.ErrorResponse
 import mu.KotlinLogging
 import org.springframework.dao.DuplicateKeyException
 import org.springframework.http.HttpStatus
