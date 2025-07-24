@@ -24,12 +24,12 @@ class PaymentServiceImpl(
         try {
             transactionalOperator.executeAndAwait {
                 val payment = request.toDomainEntity()
-                // CORREÇÃO: Removido o .awaitSingleOrNull()
-                paymentRepository.save(payment)
+                // CORREÇÃO: Dentro do transactionalOperator, o save() retorna Mono,
+                // então precisamos usar awaitSingleOrNull() para esperar o resultado.
+                paymentRepository.save(payment).awaitSingleOrNull()
 
-                val paymentEvent = PaymentEvent.newProcessPayment - PaymentEvent(payment.correlationId)
-                // CORREÇÃO: Removido o .awaitSingleOrNull()
-                paymentEventRepository.save(paymentEvent)
+                val paymentEvent = PaymentEvent.newProcessPaymentEvent(payment.correlationId)
+                paymentEventRepository.save(paymentEvent).awaitSingleOrNull()
             }
         } catch (e: Exception) {
             if (e is DuplicateKeyException) {

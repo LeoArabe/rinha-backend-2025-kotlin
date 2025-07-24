@@ -19,26 +19,22 @@ class PaymentProcessorWorkerImpl(
     private val processorClient: ProcessorClient,
     private val paymentRepository: PaymentRepository,
     private val paymentEventRepository: PaymentEventRepository
-    // Adicionar CircuitBreakerManager e leitor de saúde do Redis
 ) : PaymentProcessorWorker {
 
     private val logger = KotlinLogging.logger {}
 
     override suspend fun processPaymentFromQueue(event: PaymentEvent, payment: Payment) {
         if (payment.status.isFinal()) {
-            logger.warn { "Pagamento ${payment.correlationId} já está em estado final (${payment.status}). Pulando processamento." }
-            // Marcar evento como processado para não ser pego novamente
-            paymentEventRepository.save(event.copy(status = PaymentEventStatus.PROCESSED, processedAt = Instant.now())).subscribe()
+            logger.warn { "Pagamento ${payment.correlationId} já está em estado final (${payment.status}). Pulando." }
+            paymentEventRepository.save(event.copy(status = PaymentEventStatus.PROCESSED, processedAt = Instant.now()))
             return
         }
 
-        // 1. Marcar como PROCESSANDO para evitar trabalho duplicado
-        var currentPayment = payment.copy(status = PaymentStatus.PROCESSANDO, lastUpdatedAt = Instant.now())
-        paymentRepository.save(currentPayment).subscribe()
+        val currentPayment = payment.copy(status = PaymentStatus.PROCESSANDO, lastUpdatedAt = Instant.now())
+        paymentRepository.save(currentPayment)
 
         try {
-            // TODO: Adicionar lógica para ler a saúde do Redis aqui
-            val useDefault = true // Simplificação, deve ser baseado na saúde lida do Redis
+            val useDefault = true // TODO: Substituir por lógica de leitura de saúde do Redis
 
             if (useDefault) {
                 processWith(currentPayment, "default", processorClient::processPaymentDefault)
@@ -47,13 +43,10 @@ class PaymentProcessorWorkerImpl(
             }
 
         } catch (e: Exception) {
-            // Lógica de falha, agendamento de retry, etc.
-            logger.error(e) { "Falha não tratada ao processar pagamento ${payment.correlationId}" }
             val failedPayment = currentPayment.copy(status = PaymentStatus.FALHA, lastErrorMessage = e.message, lastUpdatedAt = Instant.now())
-            paymentRepository.save(failedPayment).subscribe()
+            paymentRepository.save(failedPayment)
         } finally {
-            // Marcar evento como processado ao final de tudo
-            paymentEventRepository.save(event.copy(status = PaymentEventStatus.PROCESSED, processedAt = Instant.now())).subscribe()
+            paymentEventRepository.save(event.copy(status = PaymentEventStatus.PROCESSED, processedAt = Instant.now()))
         }
     }
 
@@ -67,26 +60,23 @@ class PaymentProcessorWorkerImpl(
             val request = ProcessorPaymentRequest.fromPayment(payment)
             processorCall(request)
 
-            // Sucesso!
             val successPayment = payment.copy(
                 status = PaymentStatus.SUCESSO,
                 processorUsed = processorName,
                 lastUpdatedAt = Instant.now()
             )
-            paymentRepository.save(successPayment).subscribe()
+            paymentRepository.save(successPayment)
             logger.info { "Pagamento ${payment.correlationId} processado com SUCESSO via $processorName" }
 
         } catch (e: Exception) {
             // TODO: Adicionar lógica de retry com backoff aqui
-            logger.warn(e) { "Falha ao processar pagamento ${payment.correlationId} via $processorName. Tentando fallback ou agendando retry." }
+            logger.warn(e) { "Falha ao processar ${payment.correlationId} via $processorName. Tentando fallback." }
 
-            // Tenta o fallback como exemplo simples de recuperação
             if (processorName == "default") {
                 processWith(payment, "fallback", processorClient::processPaymentFallback)
             } else {
-                // Se até o fallback falhou, marca como falha definitiva
                 val failedPayment = payment.copy(status = PaymentStatus.FALHA, lastErrorMessage = e.message, lastUpdatedAt = Instant.now())
-                paymentRepository.save(failedPayment).subscribe()
+                paymentRepository.save(failedPayment)
             }
         }
     }
