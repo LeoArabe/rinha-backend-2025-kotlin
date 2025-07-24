@@ -16,27 +16,34 @@ class OutboxRelay(
     private val paymentRepository: PaymentRepository,
     private val paymentProcessorWorker: PaymentProcessorWorker
 ) {
+
     private val logger = KotlinLogging.logger {}
 
-    @Scheduled(fixedDelay = 200)
+    @Scheduled(fixedDelay = 200) // Verifica por novos eventos a cada 200ms
     suspend fun processOutboxEvents() {
+        // CORRIGIDO: Usa o método que realmente existe no repositório
         val pendingEvents = paymentEventRepository.findAllByStatus(PaymentEventStatus.PENDING).toList()
 
         if (pendingEvents.isNotEmpty()) {
             logger.info { "Encontrados ${pendingEvents.size} eventos no Outbox para processar." }
 
             val correlationIds = pendingEvents.map { it.correlationId }
+            // CORRIGIDO: Usa .toList() para converter o Flow em uma lista de forma não-bloqueante
             val paymentsMap = paymentRepository.findAllByCorrelationIdIn(correlationIds)
                 .toList()
                 .associateBy { it.correlationId }
 
             coroutineScope {
                 pendingEvents.forEach { event ->
-                    paymentsMap[event.correlationId]?.let { payment ->
+                    val payment = paymentsMap[event.correlationId]
+                    if (payment != null) {
                         launch {
                             paymentProcessorWorker.processPaymentFromQueue(event, payment)
                         }
-                    } ?: logger.warn { "Payment para o evento ${event.id} (correlationId=${event.correlationId}) não encontrado." }
+                    } else {
+                        logger.warn { "Payment para o evento ${event.id} (correlationId=${event.correlationId}) não encontrado." }
+                        // TODO: Lidar com o caso de evento órfão (ex: mover para uma "dead letter queue")
+                    }
                 }
             }
         }

@@ -5,7 +5,6 @@ import com.estagiario.gobots.rinha_backend.domain.PaymentEvent
 import com.estagiario.gobots.rinha_backend.infrastructure.incoming.dto.PaymentRequest
 import com.estagiario.gobots.rinha_backend.infrastructure.outgoing.repository.PaymentEventRepository
 import com.estagiario.gobots.rinha_backend.infrastructure.outgoing.repository.PaymentRepository
-import kotlinx.coroutines.reactor.awaitSingleOrNull
 import kotlinx.coroutines.reactor.mono
 import org.springframework.dao.DuplicateKeyException
 import org.springframework.stereotype.Service
@@ -24,16 +23,16 @@ class PaymentServiceImpl(
         try {
             transactionalOperator.executeAndAwait {
                 val payment = request.toDomainEntity()
-                // CORREÇÃO: Dentro do transactionalOperator, o save() retorna Mono,
-                // então precisamos usar awaitSingleOrNull() para esperar o resultado.
-                paymentRepository.save(payment).awaitSingleOrNull()
+                // CORREÇÃO: Repositórios Coroutine já são suspend, a chamada é direta.
+                paymentRepository.save(payment)
 
                 val paymentEvent = PaymentEvent.newProcessPaymentEvent(payment.correlationId)
-                paymentEventRepository.save(paymentEvent).awaitSingleOrNull()
+                // CORREÇÃO: Chamada direta para o método suspend.
+                paymentEventRepository.save(paymentEvent)
             }
         } catch (e: Exception) {
             if (e is DuplicateKeyException) {
-                throw e
+                throw e // Deixa o GlobalExceptionHandler tratar
             }
             throw PaymentProcessingException("Falha ao persistir intenção de pagamento ${request.correlationId}", e)
         }

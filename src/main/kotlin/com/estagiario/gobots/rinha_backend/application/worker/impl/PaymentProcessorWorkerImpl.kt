@@ -1,3 +1,5 @@
+// src/main/kotlin/com/estagiario/gobots/rinha_backend/application/worker/impl/PaymentProcessorWorkerImpl.kt
+
 package com.estagiario.gobots.rinha_backend.application.worker.impl
 
 import com.estagiario.gobots.rinha_backend.application.client.ProcessorClient
@@ -26,11 +28,13 @@ class PaymentProcessorWorkerImpl(
     override suspend fun processPaymentFromQueue(event: PaymentEvent, payment: Payment) {
         if (payment.status.isFinal()) {
             logger.warn { "Pagamento ${payment.correlationId} já está em estado final (${payment.status}). Pulando." }
+            // CORREÇÃO: Removido o .awaitSingleOrNull()
             paymentEventRepository.save(event.copy(status = PaymentEventStatus.PROCESSED, processedAt = Instant.now()))
             return
         }
 
         val currentPayment = payment.copy(status = PaymentStatus.PROCESSANDO, lastUpdatedAt = Instant.now())
+        // CORREÇÃO: Removido o .awaitSingleOrNull()
         paymentRepository.save(currentPayment)
 
         try {
@@ -44,8 +48,10 @@ class PaymentProcessorWorkerImpl(
 
         } catch (e: Exception) {
             val failedPayment = currentPayment.copy(status = PaymentStatus.FALHA, lastErrorMessage = e.message, lastUpdatedAt = Instant.now())
+            // CORREÇÃO: Removido o .awaitSingleOrNull()
             paymentRepository.save(failedPayment)
         } finally {
+            // CORREÇÃO: Removido o .awaitSingleOrNull()
             paymentEventRepository.save(event.copy(status = PaymentEventStatus.PROCESSED, processedAt = Instant.now()))
         }
     }
@@ -65,6 +71,7 @@ class PaymentProcessorWorkerImpl(
                 processorUsed = processorName,
                 lastUpdatedAt = Instant.now()
             )
+            // CORREÇÃO: Removido o .awaitSingleOrNull()
             paymentRepository.save(successPayment)
             logger.info { "Pagamento ${payment.correlationId} processado com SUCESSO via $processorName" }
 
@@ -76,6 +83,7 @@ class PaymentProcessorWorkerImpl(
                 processWith(payment, "fallback", processorClient::processPaymentFallback)
             } else {
                 val failedPayment = payment.copy(status = PaymentStatus.FALHA, lastErrorMessage = e.message, lastUpdatedAt = Instant.now())
+                // CORREÇÃO: Removido o .awaitSingleOrNull()
                 paymentRepository.save(failedPayment)
             }
         }
