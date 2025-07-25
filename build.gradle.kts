@@ -62,7 +62,7 @@ graalvmNative {
         named("main") {
             imageName.set("rinha-backend-app")
             mainClass.set("com.estagiario.gobots.rinha_backend.RinhaBackendApplicationKt")
-            buildArgs.add("--gc=Serial")
+            buildArgs.add("--gc=serial")
         }
     }
 }

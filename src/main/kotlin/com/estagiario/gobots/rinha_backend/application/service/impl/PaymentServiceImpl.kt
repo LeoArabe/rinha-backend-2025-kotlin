@@ -6,11 +6,12 @@ import com.estagiario.gobots.rinha_backend.infrastructure.incoming.dto.PaymentRe
 import com.estagiario.gobots.rinha_backend.infrastructure.outgoing.repository.PaymentEventRepository
 import com.estagiario.gobots.rinha_backend.infrastructure.outgoing.repository.PaymentRepository
 import kotlinx.coroutines.reactor.mono
+import kotlinx.coroutines.reactor.awaitSingleOrNull
 import org.springframework.dao.DuplicateKeyException
 import org.springframework.stereotype.Service
 import org.springframework.transaction.ReactiveTransaction
 import org.springframework.transaction.reactive.TransactionalOperator
-import org.springframework.transaction.reactive.executeAndAwait
+import org.springframework.transaction.reactive.executeAndAwait // This import is for the extension function
 
 @Service
 class PaymentServiceImpl(
@@ -42,7 +43,7 @@ class PaymentServiceImpl(
 // Extension function para facilitar o uso de transações com coroutines
 suspend inline fun <T> TransactionalOperator.executeAndAwait(
     crossinline action: suspend (ReactiveTransaction) -> T?
-): T? = execute { trx -> mono { action(trx) } }.awaitSingleOrNull()
+): T? = execute { trx -> mono { action(trx) } }.singleOrEmpty().awaitSingleOrNull() // Corrected line
 
 // Exceção customizada
 class PaymentProcessingException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)
