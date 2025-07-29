@@ -1,21 +1,13 @@
 package com.estagiario.gobots.rinha_backend.infrastructure.client
 
 /**
- * Exception customizada para falhas na verificação de saúde dos processadores.
- */
-class ProcessorHealthCheckException(
-    message: String,
-    cause: Throwable? = null
-) : RuntimeException(message, cause)
-
-/**
- * Exception customizada para falhas no processamento de pagamentos nos serviços externos.
+ * Exceção customizada para falhas no processamento de pagamentos nos serviços externos.
  * Contém o código de status HTTP para permitir uma lógica de retry inteligente.
  */
 class ProcessorPaymentException(
-    message: String,
+    override val message: String,
     val httpStatusCode: Int,
-    cause: Throwable? = null
+    override val cause: Throwable? = null
 ) : RuntimeException(message, cause) {
 
     /**

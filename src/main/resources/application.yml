@@ -79,9 +79,10 @@ payment:
 # Configurações de Instância (para Leader Election)
 app:
   instance-id: ${INSTANCE_ID:API-1}
-  leader-election:
-    key: "rinha:leader:health-checker"
-    ttl-seconds: 10
+  outbox:
+    processing-delay-ms: 200
+    max-parallel-events: 16
+    leader-ttl-seconds: 5
 
 # Logging otimizado para GraalVM
 logging:
