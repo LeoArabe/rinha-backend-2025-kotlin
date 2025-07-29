@@ -4,14 +4,13 @@ services:
     hostname: api01
     environment:
       - SPRING_PROFILES_ACTIVE=prod
-      - APP_PORT=8080
-      - SPRING_DATA_MONGODB_URI=mongodb://mongo:27017/rinhaDB
+      # >>>>> CORREÇÃO NA URI: Adicionado o parâmetro ?replicaSet=rs0 <<<<<
+      - SPRING_DATA_MONGODB_URI=mongodb://mongo:27017/rinhaDB?replicaSet=rs0
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - PROCESSOR_DEFAULT_URL=http://payment-processor-default:8080
       - PROCESSOR_FALLBACK_URL=http://payment-processor-fallback:8080
       - INSTANCE_ID=API-1
-      - WORKER_CONCURRENCY=16
     restart: always
     networks:
       - rinha
@@ -25,13 +24,15 @@ services:
       resources:
         limits:
           cpus: "0.25"
-          memory: "45M"
+          memory: "55M"
 
   api02:
     <<: *api
     hostname: api02
     environment:
       - INSTANCE_ID=API-2
+      # >>>>> CORREÇÃO NA URI: Adicionado o parâmetro ?replicaSet=rs0 <<<<<
+      - SPRING_DATA_MONGODB_URI=mongodb://mongo:27017/rinhaDB?replicaSet=rs0
 
   nginx:
     image: nginx:alpine
@@ -40,10 +41,8 @@ services:
     ports:
       - "9999:9999"
     depends_on:
-      api01:
-        condition: service_healthy
-      api02:
-        condition: service_healthy
+      - api01
+      - api02
     networks:
       - rinha
     deploy:
@@ -56,35 +55,53 @@ services:
     image: mongo:6.0
     container_name: mongo
     hostname: mongo
+    ports:
+      - "27017:27017"
     environment:
       - MONGO_INITDB_DATABASE=rinhaDB
     volumes:
       - mongo_data:/data/db
+    # Comando para iniciar o MongoDB já em modo replica set
+    command: --replSet rs0 --bind_ip localhost,mongo
     networks:
       - rinha
     healthcheck:
-      test: ["CMD", "mongosh", "--eval", "db.runCommand('ping').ok"]
+      # VERSÃO FINAL: Inicia o replica set explicitamente E verifica se está PRONTO
+      # para aceitar transações, resolvendo a condição de corrida de forma definitiva.
+      test: |
+        mongosh --host mongo:27017 --quiet --eval "
+          try {
+            const status = rs.status();
+            // Retorna sucesso (0) se for PRIMARY (1) ou SECONDARY (2)
+            if (status.myState === 1 || status.myState === 2) {
+              quit(0);
+            } else {
+              quit(1);
+            }
+          } catch (e) {
+            // Se rs.status() falhar, inicia o replica set com a configuração explícita
+            rs.initiate({ _id: 'rs0', members: [{ _id: 0, host: 'mongo:27017' }] });
+            quit(1);
+          }"
       interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
     deploy:
       resources:
         limits:
           cpus: "0.5"
-          memory: "140M"
-
+          memory: "120M"
   redis:
     image: redis:7-alpine
     container_name: redis
     hostname: redis
     command: >
       redis-server
-      --maxmemory 100mb # AJUSTADO
+      --maxmemory 90mb
       --maxmemory-policy allkeys-lru
       --save ""
       --appendonly no
-      --tcp-keepalive 60
     networks:
       - rinha
     healthcheck:

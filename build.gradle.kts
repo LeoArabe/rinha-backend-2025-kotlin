@@ -19,6 +19,9 @@ repositories {
     mavenCentral()
 }
 
+// O bloco sourceSets foi removido para evitar o erro de duplicata.
+// O plugin do GraalVM encontrará os recursos em src/main/resources/META-INF/native-image/ por convenção.
+
 dependencies {
     // Spring Boot Reactive Stack
     implementation("org.springframework.boot:spring-boot-starter-webflux")
@@ -29,21 +32,19 @@ dependencies {
 
     // Kotlin Core & Coroutines
     implementation("org.jetbrains.kotlin:kotlin-reflect")
-    implementation("org.jetbrains.kotlin:kotlin-stdlib-jdk8") // Garante compatibilidade com o ecossistema Java
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-reactor") // Essencial para Mono <-> Coroutine
+    implementation("io.projectreactor.kotlin:reactor-kotlin-extensions")
+    implementation("org.jetbrains.kotlin:kotlin-stdlib-jdk8")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-reactor")
 
     // JSON Processing
     implementation("com.fasterxml.jackson.module:jackson-module-kotlin")
 
-    // Logging (ESSENCIAL - Faltava no seu arquivo)
+    // Logging
     implementation("io.github.microutils:kotlin-logging-jvm:3.0.5")
 
     // Test Dependencies
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("io.projectreactor:reactor-test")
-    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test")
-    testImplementation("org.testcontainers:junit-jupiter")
-    testImplementation("org.testcontainers:mongodb")
 }
 
 tasks.withType<KotlinCompile> {

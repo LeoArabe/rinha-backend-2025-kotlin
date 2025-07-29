@@ -1,3 +1,4 @@
+// Caminho: src/main/kotlin/com/estagiario/gobots/rinha_backend/application/service/impl/PaymentServiceImpl.kt
 package com.estagiario.gobots.rinha_backend.application.service.impl
 
 import com.estagiario.gobots.rinha_backend.application.service.PaymentService
@@ -5,13 +6,12 @@ import com.estagiario.gobots.rinha_backend.domain.PaymentEvent
 import com.estagiario.gobots.rinha_backend.infrastructure.incoming.dto.PaymentRequest
 import com.estagiario.gobots.rinha_backend.infrastructure.outgoing.repository.PaymentEventRepository
 import com.estagiario.gobots.rinha_backend.infrastructure.outgoing.repository.PaymentRepository
-import kotlinx.coroutines.reactor.mono
 import kotlinx.coroutines.reactor.awaitSingleOrNull
-import org.springframework.dao.DuplicateKeyException
+import kotlinx.coroutines.reactor.mono
 import org.springframework.stereotype.Service
 import org.springframework.transaction.ReactiveTransaction
 import org.springframework.transaction.reactive.TransactionalOperator
-import org.springframework.transaction.reactive.executeAndAwait // This import is for the extension function
+import org.springframework.transaction.reactive.executeAndAwait
 
 @Service
 class PaymentServiceImpl(
@@ -20,30 +20,28 @@ class PaymentServiceImpl(
     private val transactionalOperator: TransactionalOperator
 ) : PaymentService {
 
+    /**
+     * VERSÃO CORRETA E FINAL: Sem try-catch, delega o tratamento de erros
+     * para o GlobalExceptionHandler de forma centralizada.
+     */
     override suspend fun processNewPayment(request: PaymentRequest) {
-        try {
-            transactionalOperator.executeAndAwait {
-                val payment = request.toDomainEntity()
-                // CORREÇÃO: Repositórios Coroutine já são suspend, a chamada é direta.
-                paymentRepository.save(payment)
+        transactionalOperator.executeAndAwait {
+            val payment = request.toDomainEntity()
+            paymentRepository.save(payment)
 
-                val paymentEvent = PaymentEvent.newProcessPaymentEvent(payment.correlationId)
-                // CORREÇÃO: Chamada direta para o método suspend.
-                paymentEventRepository.save(paymentEvent)
-            }
-        } catch (e: Exception) {
-            if (e is DuplicateKeyException) {
-                throw e // Deixa o GlobalExceptionHandler tratar
-            }
-            throw PaymentProcessingException("Falha ao persistir intenção de pagamento ${request.correlationId}", e)
+            val paymentEvent = PaymentEvent.newProcessPaymentEvent(payment.correlationId)
+            paymentEventRepository.save(paymentEvent)
         }
     }
 }
 
-// Extension function para facilitar o uso de transações com coroutines
-suspend inline fun <T> TransactionalOperator.executeAndAwait(
+/**
+ * Extension function corrigida para trabalhar com Flux -> Mono -> awaitSingleOrNull.
+ * O .next() é a chave para converter o Flux<T> do 'execute' em um Mono<T>.
+ */
+private suspend inline fun <T> TransactionalOperator.executeAndAwait(
     crossinline action: suspend (ReactiveTransaction) -> T?
-): T? = execute { trx -> mono { action(trx) } }.singleOrEmpty().awaitSingleOrNull() // Corrected line
+): T? = execute { trx -> mono { action(trx) } }.next().awaitSingleOrNull()
 
-// Exceção customizada
+// Exceção customizada (mantida para compatibilidade)
 class PaymentProcessingException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)
