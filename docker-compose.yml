@@ -1,38 +1,47 @@
+# Template com as configurações comuns das APIs
+x-api-template: &api-template
+  build: .
+  restart: always
+  networks:
+    - rinha
+    - payment-processor
+  depends_on:
+    mongo:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+  deploy:
+    resources:
+      limits:
+        cpus: "0.25"
+        memory: "55M"
+
 services:
-  api01: &api
-    build: .
+  api01:
+    <<: *api-template # Herda toda a configuração do template
     hostname: api01
     environment:
+      # ADICIONA/SOBRESREVE apenas as variáveis específicas desta instância
+      - INSTANCE_ID=API-1
       - SPRING_PROFILES_ACTIVE=prod
-      # >>>>> CORREÇÃO NA URI: Adicionado o parâmetro ?replicaSet=rs0 <<<<<
       - SPRING_DATA_MONGODB_URI=mongodb://mongo:27017/rinhaDB?replicaSet=rs0
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - PROCESSOR_DEFAULT_URL=http://payment-processor-default:8080
       - PROCESSOR_FALLBACK_URL=http://payment-processor-fallback:8080
-      - INSTANCE_ID=API-1
-    restart: always
-    networks:
-      - rinha
-      - payment-processor
-    depends_on:
-      mongo:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    deploy:
-      resources:
-        limits:
-          cpus: "0.25"
-          memory: "55M"
 
   api02:
-    <<: *api
+    <<: *api-template # Herda toda a configuração do template
     hostname: api02
     environment:
+      # ADICIONA/SOBRESREVE apenas as variáveis específicas desta instância
       - INSTANCE_ID=API-2
-      # >>>>> CORREÇÃO NA URI: Adicionado o parâmetro ?replicaSet=rs0 <<<<<
+      - SPRING_PROFILES_ACTIVE=prod
       - SPRING_DATA_MONGODB_URI=mongodb://mongo:27017/rinhaDB?replicaSet=rs0
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - PROCESSOR_DEFAULT_URL=http://payment-processor-default:8080
+      - PROCESSOR_FALLBACK_URL=http://payment-processor-fallback:8080
 
   nginx:
     image: nginx:alpine
@@ -57,29 +66,17 @@ services:
     hostname: mongo
     ports:
       - "27017:27017"
-    environment:
-      - MONGO_INITDB_DATABASE=rinhaDB
-    volumes:
-      - mongo_data:/data/db
-    # Comando para iniciar o MongoDB já em modo replica set
-    command: --replSet rs0 --bind_ip localhost,mongo
+    command: --replSet rs0 --bind_ip_all
     networks:
       - rinha
     healthcheck:
-      # VERSÃO FINAL: Inicia o replica set explicitamente E verifica se está PRONTO
-      # para aceitar transações, resolvendo a condição de corrida de forma definitiva.
       test: |
         mongosh --host mongo:27017 --quiet --eval "
           try {
             const status = rs.status();
-            // Retorna sucesso (0) se for PRIMARY (1) ou SECONDARY (2)
-            if (status.myState === 1 || status.myState === 2) {
-              quit(0);
-            } else {
-              quit(1);
-            }
+            if (status.myState === 1 || status.myState === 2) { quit(0); }
+            else { quit(1); }
           } catch (e) {
-            // Se rs.status() falhar, inicia o replica set com a configuração explícita
             rs.initiate({ _id: 'rs0', members: [{ _id: 0, host: 'mongo:27017' }] });
             quit(1);
           }"
@@ -92,16 +89,15 @@ services:
         limits:
           cpus: "0.5"
           memory: "120M"
+    volumes:
+      - mongo_data:/data/db
+
   redis:
     image: redis:7-alpine
     container_name: redis
     hostname: redis
     command: >
-      redis-server
-      --maxmemory 90mb
-      --maxmemory-policy allkeys-lru
-      --save ""
-      --appendonly no
+      redis-server --maxmemory 90mb --maxmemory-policy allkeys-lru --save "" --appendonly no
     networks:
       - rinha
     healthcheck:
@@ -118,11 +114,10 @@ services:
 
 volumes:
   mongo_data:
-    driver: local
 
 networks:
   rinha:
     driver: bridge
+  # Esta rede agora é definida aqui, não mais como externa
   payment-processor:
-    name: payment-processor
-    external: true
+    driver: bridge

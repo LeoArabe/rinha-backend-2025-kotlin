@@ -29,9 +29,12 @@ USER nonroot:nonroot
 WORKDIR /home/nonroot
 
 # Copiar apenas o executável da stage de build
-COPY --from=builder --chown=nonroot:nonroot /app/build/native/nativeCompile/rinha-backend-app ./rinha-backend-app
+COPY --from=builder /app/build/native/nativeCompile/rinha-backend-app /app
 
 EXPOSE 8080
 
-# O Entrypoint é o próprio executável. A configuração será passada pelo docker-compose.
-ENTRYPOINT ["./rinha-backend-app"]
+# >>>>> MUDANÇA AQUI: ENTRYPOINT com argumentos diretos para Redis <<<<<
+ENTRYPOINT ["/app", \
+            "--spring.profiles.active=prod", \
+            "--spring.redis.host=redis", \
+            "--spring.redis.port=6379"]

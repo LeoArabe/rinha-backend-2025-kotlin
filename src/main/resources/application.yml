@@ -13,23 +13,24 @@ spring:
   application:
     name: rinha-backend-2025
 
-  # Configuração MongoDB Reativa
+  # Configuração MongoDB Reativa (Default Profile: usa localhost como fallback)
   data:
     mongodb:
       uri: ${SPRING_DATA_MONGODB_URI:mongodb://localhost:27017/rinhaDB}
       auto-index-creation: true
 
-  # Configuração Redis Reativa
+  # Configuração Redis Reativa (Default Profile)
   redis:
     host: ${REDIS_HOST:localhost}
     port: ${REDIS_PORT:6379}
-    timeout: 1s
+    timeout: 2s # Mantido 2s, 5s é do perfil prod
     lettuce:
       pool:
-        max-active: 20
-        max-idle: 10
-        min-idle: 2
-      shutdown-timeout: 1s
+        max-active: 8 # Ajuste do pool
+        max-wait: -1ms # Espera infinita
+        max-idle: 8
+        min-idle: 0
+      shutdown-timeout: 3s
 
   # WebFlux Configurações
   webflux:
@@ -51,7 +52,7 @@ spring:
       mongo:
         enabled: true
 
-# Configurações dos Payment Processors
+# Configurações dos Payment Processors (Default Profile)
 payment:
   processors:
     default:
@@ -63,37 +64,51 @@ payment:
       fee-percentage: 0.15
       name: "fallback"
 
-  # Configurações do Circuit Breaker
+  # Configurações do Circuit Breaker (Default Profile)
   circuit-breaker:
     failure-threshold: ${CIRCUIT_BREAKER_FAILURE_THRESHOLD:5}
     recovery-timeout-seconds: ${CIRCUIT_BREAKER_RECOVERY_TIMEOUT:30}
     request-timeout-seconds: ${CIRCUIT_BREAKER_REQUEST_TIMEOUT:4}
 
-  # Configurações dos Workers
+  # Configurações dos Workers (Default Profile)
   workers:
     concurrency: ${WORKER_CONCURRENCY:16}
     health-check-interval-seconds: 5
     retry-max-attempts: 3
     retry-backoff-seconds: 2
 
-# Configurações de Instância (para Leader Election)
+# Configurações de Instância (para Leader Election) (Default Profile)
 app:
   instance-id: ${INSTANCE_ID:API-1}
+  leader-election:
+    key: "rinha:leader:health-checker"
+    ttl-seconds: 10 # Do compose antigo, mais consistente com Redis TTL
   outbox:
     processing-delay-ms: 200
     max-parallel-events: 16
-    leader-ttl-seconds: 5
+    leader-ttl-seconds: 5 # Novo, do seu OutboxRelay
 
-# Logging otimizado para GraalVM
+# Logging otimizado para GraalVM (Default Profile)
 logging:
   level:
-    com.estagiario.gobots.rinha_backend: INFO
-    org.springframework.data.mongodb: WARN
-    org.springframework.data.redis: WARN
+    # >>>>> MANTENDO SUAS VARIÁVEIS DE AMBIENTE PARA DEBUG <<<<<
+    com.estagiario.gobots.rinha_backend: ${LOGGING_LEVEL_COM_ESTAGIARIO_GOBOTS:INFO}
+    org.springframework.data.mongodb: ${LOGGING_LEVEL_ORG_SPRINGFRAMEWORK_DATA_MONGODB:WARN}
+    org.springframework.data.mongodb.core.ReactiveMongoTemplate: ${LOGGING_LEVEL_ORG_SPRINGFRAMEWORK_DATA_MONGODB:WARN}
+    org.springframework.data.redis: WARN # Mantido WARN, pois debug será na API
     reactor.netty: WARN
     org.mongodb.driver: ERROR
+    org.springframework.web: WARN # Novo, do seu
+    org.springframework.boot: WARN # Novo, do seu
+    root: INFO # Root level
+
   pattern:
     console: "%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
+
+# >>>>> CONFIGURAÇÃO PARA GRAALVM NATIVE <<<<<
+spring:
+  native:
+    remove-yaml-support: false # Manter suporte a YAML, ok.
 
 ---
 # Profile de Produção (usado nos containers)
@@ -102,32 +117,33 @@ spring:
     activate:
       on-profile: prod
 
-  # MongoDB otimizado para produção
+  # MongoDB otimizado para produção (usa variável de ambiente)
   data:
     mongodb:
-      uri: ${SPRING_DATA_MONGODB_URI}
+      uri: ${SPRING_DATA_MONGODB_URI} # Espera a URI do ambiente
       auto-index-creation: false
 
   # Redis otimizado para produção
   redis:
-    host: ${REDIS_HOST:redis}
+    host: ${REDIS_HOST:redis} # Espera o host do ambiente, com fallback 'redis'
     port: ${REDIS_PORT:6379}
+    timeout: 5s # MUDANÇA: Aumentado para 5s, consistente com o que discutimos
     lettuce:
       pool:
-        max-active: 32
+        max-active: 32 # Otimizado para prod
         max-idle: 16
         min-idle: 4
 
-# Logging mínimo em produção
+# Logging em produção (pode ser sobrescrito pelas variáveis de ambiente do Compose)
 logging:
   level:
     root: WARN
-    com.estagiario.gobots.rinha_backend: INFO
+    com.estagiario.gobots.rinha_backend: INFO # Pode ser sobrescrito por LOGGING_LEVEL_COM_ESTAGIARIO_GOBOTS
   pattern:
     console: "%d{HH:mm:ss} %-5level [%thread] %logger{25} - %msg%n"
 
 ---
-# Profile de desenvolvimento/teste
+# Profile de desenvolvimento/teste (para usar localmente, se não Docker)
 spring:
   config:
     activate:
@@ -143,5 +159,5 @@ payment:
 
 logging:
   level:
-    com.estagiario.gobots.rinha_backend: DEBUG
-    reactor.netty.http: DEBUG
+    com.estagiario.gobots.rinha_backend: DEBUG # DEBUG em dev
+    reactor.netty.http: DEBUG # Novo, do seu
