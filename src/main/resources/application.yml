@@ -13,13 +13,13 @@ spring: # ESTE É O BLOCO 'spring' PRINCIPAL
   application:
     name: rinha-backend-2025
 
-  # >>>>> CORREÇÃO AQUI: spring.native MOVIDO PARA DENTRO DO BLOCO 'spring' PRINCIPAL <<<<<
-  native:
-    remove-yaml-support: false # Garante que o suporte a YAML seja mantido
+  native: # MANTIDA ESTA CONFIGURAÇÃO AQUI
+    remove-yaml-support: false
 
   # Configuração MongoDB Reativa (Default Profile: usa localhost como fallback)
   data:
     mongodb:
+      # A URI com replicaSet será passada pelo command no docker-compose.yml
       uri: ${SPRING_DATA_MONGODB_URI:mongodb://localhost:27017/rinhaDB}
       auto-index-creation: true
 
@@ -27,11 +27,11 @@ spring: # ESTE É O BLOCO 'spring' PRINCIPAL
   redis:
     host: ${REDIS_HOST:localhost}
     port: ${REDIS_PORT:6379}
-    timeout: 2s # Mantido 2s, 5s é do perfil prod
+    timeout: 2s # Timeout para o perfil padrão
     lettuce:
       pool:
-        max-active: 8 # Ajuste do pool
-        max-wait: -1ms # Espera infinita
+        max-active: 8
+        max-wait: -1ms
         max-idle: 8
         min-idle: 0
       shutdown-timeout: 3s
@@ -45,11 +45,11 @@ spring: # ESTE É O BLOCO 'spring' PRINCIPAL
     endpoints:
       web:
         exposure:
-          include: health,info
+          include: health,info,metrics
         base-path: /actuator
     endpoint:
       health:
-        show-details: when-authorized
+        show-details: always
     health:
       redis:
         enabled: true
@@ -86,64 +86,67 @@ app:
   instance-id: ${INSTANCE_ID:API-1}
   leader-election:
     key: "rinha:leader:health-checker"
-    ttl-seconds: 10 # Do compose antigo, mais consistente com Redis TTL
+    ttl-seconds: 10
   outbox:
     processing-delay-ms: 200
     max-parallel-events: 16
-    leader-ttl-seconds: 5 # Novo, do seu OutboxRelay
+    leader-ttl-seconds: 5
 
 # Logging otimizado para GraalVM (Default Profile)
 logging:
   level:
-    # Nível padrão para nossa aplicação
-    com.estagiario.gobots.rinha_backend: INFO
-    # Nível específico para os workers, que são mais "falantes"
-    com.estagiario.gobots.rinha_backend.application.worker: INFO
-    # Silenciando bibliotecas externas
-    org.springframework: WARN
-    org.mongodb.driver: WARN
+    root: WARN
+    com.estagiario.gobots.rinha_backend: ${LOGGING_LEVEL_COM_ESTAGIARIO_GOBOTS:INFO}
+    org.springframework.data.mongodb: ${LOGGING_LEVEL_ORG_SPRINGFRAMEWORK_DATA_MONGODB:WARN}
+    org.springframework.data.mongodb.core.ReactiveMongoTemplate: ${LOGGING_LEVEL_ORG_SPRINGFRAMEWORK_DATA_MONGODB:WARN}
+    org.springframework.data.redis: WARN
     reactor.netty: WARN
+    org.mongodb.driver: ERROR
+    org.springframework.web: WARN
+    org.springframework.boot: WARN
+
+  pattern:
+    console: "%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
 
 ---
 # Profile de Produção (usado nos containers)
-spring: # ESTE É O BLOCO 'spring' PARA O PERFIL PROD
+spring:
   config:
     activate:
       on-profile: prod
 
-  # MongoDB otimizado para produção (usa variável de ambiente)
+  # MongoDB otimizado para produção (a URI completa virá do command do docker-compose)
   data:
     mongodb:
-      uri: ${SPRING_DATA_MONGODB_URI} # Espera a URI do ambiente
+      uri: ${SPRING_DATA_MONGODB_URI}
       auto-index-creation: false
 
-  # Redis otimizado para produção
+  # Redis otimizado para produção (host/port virão do command do docker-compose)
   redis:
-    host: ${REDIS_HOST:redis} # Espera o host do ambiente, com fallback 'redis'
+    host: ${REDIS_HOST:redis}
     port: ${REDIS_PORT:6379}
-    timeout: 5s # MUDANÇA: Aumentado para 5s, consistente com o que discutimos
+    timeout: 5s
     lettuce:
       pool:
-        max-active: 32 # Otimizado para prod
+        max-active: 32
         max-idle: 16
         min-idle: 4
 
 # Logging em produção (pode ser sobrescrito pelas variáveis de ambiente do Compose)
 logging:
   level:
-    # Mantém os workers em INFO para vermos quando lotes são processados
-    com.estagiario.gobots.rinha_backend.application.worker: INFO
-    # Mantém o resto da nossa app em INFO
+    root: WARN
     com.estagiario.gobots.rinha_backend: INFO
+  pattern:
+    console: "%d{HH:mm:ss} %-5level [%thread] %logger{25} - %msg%n"
 
 ---
 # Profile de desenvolvimento/teste (para usar localmente, se não Docker)
-spring: # ESTE É O BLOCO 'spring' PARA O PERFIL DEV
+spring:
   config:
     activate:
       on-profile: dev
 
-# Configurações locais para desenvolvimento
 payment:
   processors:
     default:
@@ -153,7 +156,5 @@ payment:
 
 logging:
   level:
-    # Em dev, queremos ver todos os detalhes
     com.estagiario.gobots.rinha_backend: DEBUG
-    org.springframework.data.mongodb: DEBUG # Útil para ver as queries
-    reactor.netty.http.client: DEBUG # Útil para depurar chamadas HTTP
+    reactor.netty.http: DEBUG

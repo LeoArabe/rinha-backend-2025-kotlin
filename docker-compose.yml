@@ -1,77 +1,31 @@
-# Template com as configurações comuns das APIs
-x-api-template: &api-template
-  build: .
-  restart: always
-  networks:
-    - rinha
-    - payment-processor
-  depends_on:
-    mongo:
-      condition: service_healthy
-    redis:
-      condition: service_healthy
-  deploy:
-    resources:
-      limits:
-        cpus: "0.25"
-        memory: "55M"
+version: '3.8'
 
 services:
-  api01:
-    <<: *api-template # Herda toda a configuração do template
-    hostname: api01
-    environment:
-      # ADICIONA/SOBRESREVE apenas as variáveis específicas desta instância
-      - INSTANCE_ID=API-1
-      - SPRING_PROFILES_ACTIVE=prod
-      - SPRING_DATA_MONGODB_URI=mongodb://mongo:27017/rinhaDB?replicaSet=rs0
-      - PROCESSOR_DEFAULT_URL=http://payment-processor-default:8080
-      - PROCESSOR_FALLBACK_URL=http://payment-processor-fallback:8080
-
-  api02:
-    <<: *api-template # Herda toda a configuração do template
-    hostname: api02
-    environment:
-      # ADICIONA/SOBRESREVE apenas as variáveis específicas desta instância
-      - INSTANCE_ID=API-2
-      - SPRING_PROFILES_ACTIVE=prod
-      - SPRING_DATA_MONGODB_URI=mongodb://mongo:27017/rinhaDB?replicaSet=rs0
-      - PROCESSOR_DEFAULT_URL=http://payment-processor-default:8080
-      - PROCESSOR_FALLBACK_URL=http://payment-processor-fallback:8080
-
-  nginx:
-    image: nginx:alpine
-    volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf:ro
-    ports:
-      - "9999:9999"
-    depends_on:
-      - api01
-      - api02
-    networks:
-      - rinha
-    deploy:
-      resources:
-        limits:
-          cpus: "0.1"
-          memory: "20M"
-
+  # Serviços de infraestrutura
   mongo:
-    image: mongo:6.0
+    image: mongo:7.0
     container_name: mongo
     hostname: mongo
-    ports:
-      - "27017:27017"
-    command: --replSet rs0 --bind_ip_all --quiet
+    restart: unless-stopped
+    environment:
+      - MONGO_INITDB_DATABASE=rinhaDB
+    volumes:
+      - mongo_data:/data/db
+    # Comando para iniciar o MongoDB como replica set e bind_ip_all para acessibilidade
+    command: --replSet rs0 --bind_ip_all --logpath /dev/null --quiet
     networks:
-      - rinha
+      - rinha-network
     healthcheck:
+      # Health check inteligente para replica set
       test: |
         mongosh --host mongo:27017 --quiet --eval "
           try {
             const status = rs.status();
-            if (status.myState === 1 || status.myState === 2) { quit(0); }
-            else { quit(1); }
+            if (status.myState === 1 || status.myState === 2) {
+              quit(0);
+            } else {
+              quit(1);
+            }
           } catch (e) {
             rs.initiate({ _id: 'rs0', members: [{ _id: 0, host: 'mongo:27017' }] });
             quit(1);
@@ -84,36 +38,106 @@ services:
       resources:
         limits:
           cpus: "0.5"
-          memory: "120M"
-    volumes:
-      - mongo_data:/data/db
+          memory: "512M"
 
   redis:
-    image: redis:7-alpine
+    image: redis:7.2-alpine
     container_name: redis
     hostname: redis
+    restart: unless-stopped
     command: >
-      redis-server --maxmemory 90mb --maxmemory-policy allkeys-lru --save "" --appendonly no
+      redis-server
+      --maxmemory 90mb
+      --maxmemory-policy allkeys-lru
+      --save ""
+      --appendonly no
     networks:
-      - rinha
+      - rinha-network
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
-      timeout: 3s
+      timeout: 5s
       retries: 5
-      start_period: 10s
+      start_period: 20s
     deploy:
       resources:
         limits:
           cpus: "0.4"
           memory: "100M"
 
+  # APIs (api01, api02) - AGORA USARÃO O ENTRYPOINT DO DOCKERFILE
+  api01: &api-template
+    build: .
+    hostname: api01
+    environment:
+      - INSTANCE_ID=API-1
+      - WORKER_CONCURRENCY=16
+      # Variáveis para controle de logging via ambiente (definidas no application.yml)
+      - LOGGING_LEVEL_COM_ESTAGIARIO_GOBOTS=DEBUG
+      - LOGGING_LEVEL_ORG_SPRINGFRAMEWORK_DATA_MONGODB=DEBUG
+      # URLs dos processadores de pagamento (se não incluídos, pode apontar para mocks ou serviços externos)
+      - PROCESSOR_DEFAULT_URL=http://localhost:8001 # Exemplo, ajuste se tiver mocks locais
+      - PROCESSOR_FALLBACK_URL=http://localhost:8002 # Exemplo, ajuste se tiver mocks locais
+    ports:
+      - "8081:8080" # Mapeamento de porta para acesso externo
+    restart: always
+    networks:
+      - rinha-network
+      # A rede 'payment-processor' foi removida das dependências das APIs,
+      # pois os serviços de processador não estão mais neste compose.
+      # Se você ainda quer que a API tente se conectar a processadores que estão noutro compose,
+      # remova o comentário e altere 'payment-processor' para o nome da rede externa.
+      # - payment-processor # REMOVIDO OU ADICIONE SE FOR REDE EXTERNA
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: "155M"
+    healthcheck:
+      test: [ "CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/actuator/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  api02:
+    <<: *api-template # Reusa as configurações do template
+    hostname: api02
+    ports:
+      - "8082:8080" # Mapeamento de porta específico para api02
+    environment:
+      - INSTANCE_ID=API-2 # Sobrescreve apenas o ID da instância
+      - WORKER_CONCURRENCY=16
+      - LOGGING_LEVEL_COM_ESTAGIARIO_GOBOTS=DEBUG
+      - LOGGING_LEVEL_ORG_SPRINGFRAMEWORK_DATA_MONGODB=DEBUG
+
+  nginx:
+    image: nginx:alpine
+    container_name: nginx
+    restart: unless-stopped
+    ports:
+      - "9999:9999"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      api01:
+        condition: service_healthy
+      api02:
+        condition: service_healthy
+    networks:
+      - rinha-network
+
 volumes:
   mongo_data:
 
 networks:
-  rinha:
+  rinha-network:
     driver: bridge
-  # Esta rede agora é definida aqui, não mais como externa
-  payment-processor:
+  payment-processor: # REMOVIDO SE NÃO USAR REDE LOCAL PARA PROCESSADORES
     driver: bridge
+    external: true # ADICIONE SE A REDE VIER DE OUTRO COMPOSE E JA TIVER SIDO CRIADA

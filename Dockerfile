@@ -16,25 +16,30 @@ COPY src src
 
 # Build do executável nativo e otimização
 RUN ./gradlew nativeCompile --no-daemon \
+    -Dspring.aot.jvmArgs="-XX:+UnlockExperimentalVMOptions -XX:+UseZGC -XX:+UseTransparentHugePages" \
+    -Dspring.native.buildArgs="--optimize=2 -H:+UnlockExperimentalVMOptions -H:+UseContainerSupport" \
+    && ls -la build/native/nativeCompile/rinha-backend-app \
     && strip build/native/nativeCompile/rinha-backend-app
 
-# Stage 2: Imagem final baseada em Debian Slim
-# CORREÇÃO: Usamos debian:12-slim que é minimalista mas contém /bin/sh
-FROM debian:12-slim
+# Stage 2: Preparar dependências de runtime (libz.so.1)
+FROM ubuntu:22.04 AS runtime_deps_builder
 
-# Cria um usuário não-root para segurança
-RUN groupadd --gid 1001 nonroot && \
-    useradd --uid 1001 --gid 1001 -m nonroot
-USER nonroot:nonroot
-WORKDIR /home/nonroot
+# Primeiro, atualiza o apt-get
+RUN apt-get update
 
-# Copiar apenas o executável da stage de build
+# Depois, instala a biblioteca (usando --no-install-recommends que é mais robusto) e limpa
+RUN apt-get install -y --no-install-recommends zlib1g && rm -rf /var/lib/apt/lists/*
+
+# Stage 3: Runtime ultra-minimal com glibc e libz.so.1
+FROM gcr.io/distroless/base:nonroot
+
+# Copiar libz.so.1 da stage 'runtime_deps_builder' para o local esperado
+COPY --from=runtime_deps_builder /lib/x86_64-linux-gnu/libz.so.1 /usr/lib/libz.so.1
+
+# Copiar apenas o executável otimizado da stage 'builder'
 COPY --from=builder /app/build/native/nativeCompile/rinha-backend-app /app
 
 EXPOSE 8080
 
-# >>>>> MUDANÇA AQUI: ENTRYPOINT com argumentos diretos para Redis <<<<<
-ENTRYPOINT ["/app", \
-            "--spring.profiles.active=prod", \
-            "--spring.redis.host=redis", \
-            "--spring.redis.port=6379"]
+# >>>>> ENTRYPOINT SIMPLIFICADO: Apenas inicia a app, configurações vêm do docker-compose.yml <<<<<
+ENTRYPOINT ["/app", "--spring.profiles.active=prod"]

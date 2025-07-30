@@ -7,7 +7,6 @@ import com.estagiario.gobots.rinha_backend.domain.Payment
 import com.estagiario.gobots.rinha_backend.domain.PaymentEvent
 import com.estagiario.gobots.rinha_backend.domain.PaymentEventStatus
 import com.estagiario.gobots.rinha_backend.domain.PaymentStatus
-import com.estagiario.gobots.rinha_backend.domain.exception.PaymentProcessingException
 import com.estagiario.gobots.rinha_backend.infrastructure.client.ProcessorPaymentException
 import com.estagiario.gobots.rinha_backend.infrastructure.client.dto.ProcessorPaymentRequest
 import com.estagiario.gobots.rinha_backend.infrastructure.outgoing.repository.PaymentEventRepository
@@ -42,7 +41,7 @@ class PaymentProcessorWorkerImpl(
         )
         val currentPayment = paymentRepository.save(processingPayment)
 
-        // Tenta o processador default. Se for sucesso, a função encerra.
+        // Tenta o processador default. Se for sucesso, o 'return' encerra a função.
         if (tryProcessor("default", currentPayment)) {
             markEventAsProcessed(event)
             return
@@ -54,10 +53,10 @@ class PaymentProcessorWorkerImpl(
             return
         }
 
-        // Se ambos falharam, a lógica de retry/falha já foi tratada dentro de `tryProcessor`.
-        // Verificamos o estado final para decidir se o evento deve ser finalizado.
-        val finalPaymentState = paymentRepository.findById(payment.correlationId)
-        if (finalPaymentState?.status?.isFinal() == true) {
+        // Se ambos falharam, a lógica de retry/falha já foi tratada.
+        // Verificamos o estado atual do objeto (que foi modificado por handleProcessingFailure)
+        // para decidir se o evento deve ser finalizado.
+        if (currentPayment.status == PaymentStatus.FALHA) {
             markEventAsProcessed(event)
         }
         // Se o estado for AGENDADO_RETRY, NÃO marcamos, para que seja pego novamente pelo Relay.

@@ -1,0 +1,37 @@
+[
+  {
+    "name": "com.estagiario.gobots.rinha_backend.infrastructure.incoming.dto.PaymentRequest",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true
+  },
+  {
+    "name": "com.estagiario.gobots.rinha_backend.infrastructure.incoming.dto.PaymentSummaryResponse",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true
+  },
+  {
+    "name": "com.estagiario.gobots.rinha_backend.infrastructure.incoming.dto.ProcessorSummary",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true
+  },
+  {
+    "name": "com.estagiario.gobots.rinha_backend.infrastructure.incoming.handler.ErrorResponse",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true
+  },
+  {
+    "name": "com.estagiario.gobots.rinha_backend.infrastructure.client.dto.ProcessorPaymentRequest",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true
+  },
+  {
+    "name": "com.estagiario.gobots.rinha_backend.infrastructure.client.dto.ProcessorPaymentResponse",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true
+  },
+  {
+    "name": "com.estagiario.gobots.rinha_backend.infrastructure.client.dto.ProcessorHealthResponse",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true
+  }
+]
