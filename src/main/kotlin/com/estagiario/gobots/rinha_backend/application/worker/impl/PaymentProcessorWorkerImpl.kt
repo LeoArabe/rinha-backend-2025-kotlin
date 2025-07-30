@@ -1,3 +1,4 @@
+// Caminho: src/main/kotlin/com/estagiario/gobots/rinha_backend/application/worker/impl/PaymentProcessorWorkerImpl.kt
 package com.estagiario.gobots.rinha_backend.application.worker.impl
 
 import com.estagiario.gobots.rinha_backend.application.client.ProcessorClient
@@ -6,10 +7,9 @@ import com.estagiario.gobots.rinha_backend.domain.Payment
 import com.estagiario.gobots.rinha_backend.domain.PaymentEvent
 import com.estagiario.gobots.rinha_backend.domain.PaymentEventStatus
 import com.estagiario.gobots.rinha_backend.domain.PaymentStatus
-// >>>>> INÍCIO DAS CORREÇÕES <<<<<
+import com.estagiario.gobots.rinha_backend.domain.exception.PaymentProcessingException
 import com.estagiario.gobots.rinha_backend.infrastructure.client.ProcessorPaymentException
 import com.estagiario.gobots.rinha_backend.infrastructure.client.dto.ProcessorPaymentRequest
-// >>>>> FIM DAS CORREÇÕES <<<<<
 import com.estagiario.gobots.rinha_backend.infrastructure.outgoing.repository.PaymentEventRepository
 import com.estagiario.gobots.rinha_backend.infrastructure.outgoing.repository.PaymentRepository
 import mu.KotlinLogging
@@ -42,28 +42,35 @@ class PaymentProcessorWorkerImpl(
         )
         val currentPayment = paymentRepository.save(processingPayment)
 
+        // Tenta o processador default. Se for sucesso, a função encerra.
         if (tryProcessor("default", currentPayment)) {
             markEventAsProcessed(event)
             return
         }
 
+        // Se chegou aqui, o default falhou. Tenta o fallback.
         if (tryProcessor("fallback", currentPayment)) {
             markEventAsProcessed(event)
             return
         }
 
+        // Se ambos falharam, a lógica de retry/falha já foi tratada dentro de `tryProcessor`.
+        // Verificamos o estado final para decidir se o evento deve ser finalizado.
         val finalPaymentState = paymentRepository.findById(payment.correlationId)
         if (finalPaymentState?.status?.isFinal() == true) {
             markEventAsProcessed(event)
         }
+        // Se o estado for AGENDADO_RETRY, NÃO marcamos, para que seja pego novamente pelo Relay.
     }
 
     private suspend fun tryProcessor(processorName: String, payment: Payment): Boolean {
         return try {
+            // TODO: Envolver com CircuitBreaker
             val request = ProcessorPaymentRequest.fromPayment(payment)
             val processorCall = if (processorName == "default") processorClient::processPaymentDefault else processorClient::processPaymentFallback
             processorCall(request)
 
+            // Sucesso!
             val successPayment = payment.copy(
                 status = PaymentStatus.SUCESSO,
                 processorUsed = processorName,
@@ -71,13 +78,14 @@ class PaymentProcessorWorkerImpl(
             )
             paymentRepository.save(successPayment)
             logger.info { "Pagamento ${payment.correlationId} SUCESSO via $processorName" }
-            true
+            true // Retorna sucesso
 
         } catch (e: Exception) {
             logger.warn(e) { "Falha ao processar ${payment.correlationId} via $processorName" }
+            // Encapsula exceções de rede/timeout para tratamento padronizado e robusto
             val paymentException = if (e is ProcessorPaymentException) e else ProcessorPaymentException("Network/Timeout Error", 0, e)
             handleProcessingFailure(payment, paymentException)
-            false
+            false // Retorna falha
         }
     }
 
@@ -93,6 +101,7 @@ class PaymentProcessorWorkerImpl(
             lastErrorMessage = exception.message,
             lastUpdatedAt = Instant.now(),
             nextRetryAt = if (nextStatus == PaymentStatus.AGENDADO_RETRY) {
+                // Backoff exponencial simples (2s, 4s, 8s...)
                 val delaySeconds = (2.seconds.inWholeSeconds.shl(payment.attemptCount - 1))
                 Instant.now().plusSeconds(delaySeconds)
             } else {

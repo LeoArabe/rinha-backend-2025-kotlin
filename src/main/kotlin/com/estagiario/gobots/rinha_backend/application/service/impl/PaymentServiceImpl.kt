@@ -1,4 +1,3 @@
-// Caminho: src/main/kotlin/com/estagiario/gobots/rinha_backend/application/service/impl/PaymentServiceImpl.kt
 package com.estagiario.gobots.rinha_backend.application.service.impl
 
 import com.estagiario.gobots.rinha_backend.application.service.PaymentService
@@ -11,7 +10,6 @@ import kotlinx.coroutines.reactor.mono
 import org.springframework.stereotype.Service
 import org.springframework.transaction.ReactiveTransaction
 import org.springframework.transaction.reactive.TransactionalOperator
-import org.springframework.transaction.reactive.executeAndAwait
 
 @Service
 class PaymentServiceImpl(
@@ -20,11 +18,8 @@ class PaymentServiceImpl(
     private val transactionalOperator: TransactionalOperator
 ) : PaymentService {
 
-    /**
-     * VERSÃO CORRETA E FINAL: Sem try-catch, delega o tratamento de erros
-     * para o GlobalExceptionHandler de forma centralizada.
-     */
     override suspend fun processNewPayment(request: PaymentRequest) {
+        // A extension function agora irá compilar corretamente
         transactionalOperator.executeAndAwait {
             val payment = request.toDomainEntity()
             paymentRepository.save(payment)
@@ -36,12 +31,9 @@ class PaymentServiceImpl(
 }
 
 /**
- * Extension function corrigida para trabalhar com Flux -> Mono -> awaitSingleOrNull.
- * O .next() é a chave para converter o Flux<T> do 'execute' em um Mono<T>.
+ * Extension function para facilitar o uso de transações reativas com corrotinas.
+ * O .next() converte o Flux resultante em um Mono, permitindo que o awaitSingleOrNull funcione.
  */
 private suspend inline fun <T> TransactionalOperator.executeAndAwait(
     crossinline action: suspend (ReactiveTransaction) -> T?
 ): T? = execute { trx -> mono { action(trx) } }.next().awaitSingleOrNull()
-
-// Exceção customizada (mantida para compatibilidade)
-class PaymentProcessingException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)

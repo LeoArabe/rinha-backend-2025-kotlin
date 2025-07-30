@@ -9,9 +9,13 @@ server:
   compression:
     enabled: false # Sem compressão para payloads pequenos da Rinha
 
-spring:
+spring: # ESTE É O BLOCO 'spring' PRINCIPAL
   application:
     name: rinha-backend-2025
+
+  # >>>>> CORREÇÃO AQUI: spring.native MOVIDO PARA DENTRO DO BLOCO 'spring' PRINCIPAL <<<<<
+  native:
+    remove-yaml-support: false # Garante que o suporte a YAML seja mantido
 
   # Configuração MongoDB Reativa (Default Profile: usa localhost como fallback)
   data:
@@ -91,28 +95,18 @@ app:
 # Logging otimizado para GraalVM (Default Profile)
 logging:
   level:
-    # >>>>> MANTENDO SUAS VARIÁVEIS DE AMBIENTE PARA DEBUG <<<<<
-    com.estagiario.gobots.rinha_backend: ${LOGGING_LEVEL_COM_ESTAGIARIO_GOBOTS:INFO}
-    org.springframework.data.mongodb: ${LOGGING_LEVEL_ORG_SPRINGFRAMEWORK_DATA_MONGODB:WARN}
-    org.springframework.data.mongodb.core.ReactiveMongoTemplate: ${LOGGING_LEVEL_ORG_SPRINGFRAMEWORK_DATA_MONGODB:WARN}
-    org.springframework.data.redis: WARN # Mantido WARN, pois debug será na API
+    # Nível padrão para nossa aplicação
+    com.estagiario.gobots.rinha_backend: INFO
+    # Nível específico para os workers, que são mais "falantes"
+    com.estagiario.gobots.rinha_backend.application.worker: INFO
+    # Silenciando bibliotecas externas
+    org.springframework: WARN
+    org.mongodb.driver: WARN
     reactor.netty: WARN
-    org.mongodb.driver: ERROR
-    org.springframework.web: WARN # Novo, do seu
-    org.springframework.boot: WARN # Novo, do seu
-    root: INFO # Root level
-
-  pattern:
-    console: "%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
-
-# >>>>> CONFIGURAÇÃO PARA GRAALVM NATIVE <<<<<
-spring:
-  native:
-    remove-yaml-support: false # Manter suporte a YAML, ok.
 
 ---
 # Profile de Produção (usado nos containers)
-spring:
+spring: # ESTE É O BLOCO 'spring' PARA O PERFIL PROD
   config:
     activate:
       on-profile: prod
@@ -137,14 +131,14 @@ spring:
 # Logging em produção (pode ser sobrescrito pelas variáveis de ambiente do Compose)
 logging:
   level:
-    root: WARN
-    com.estagiario.gobots.rinha_backend: INFO # Pode ser sobrescrito por LOGGING_LEVEL_COM_ESTAGIARIO_GOBOTS
-  pattern:
-    console: "%d{HH:mm:ss} %-5level [%thread] %logger{25} - %msg%n"
+    # Mantém os workers em INFO para vermos quando lotes são processados
+    com.estagiario.gobots.rinha_backend.application.worker: INFO
+    # Mantém o resto da nossa app em INFO
+    com.estagiario.gobots.rinha_backend: INFO
 
 ---
 # Profile de desenvolvimento/teste (para usar localmente, se não Docker)
-spring:
+spring: # ESTE É O BLOCO 'spring' PARA O PERFIL DEV
   config:
     activate:
       on-profile: dev
@@ -159,5 +153,7 @@ payment:
 
 logging:
   level:
-    com.estagiario.gobots.rinha_backend: DEBUG # DEBUG em dev
-    reactor.netty.http: DEBUG # Novo, do seu
+    # Em dev, queremos ver todos os detalhes
+    com.estagiario.gobots.rinha_backend: DEBUG
+    org.springframework.data.mongodb: DEBUG # Útil para ver as queries
+    reactor.netty.http.client: DEBUG # Útil para depurar chamadas HTTP
