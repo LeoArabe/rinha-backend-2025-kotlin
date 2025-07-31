@@ -2,36 +2,133 @@
   {
     "name": "com.estagiario.gobots.rinha_backend.infrastructure.incoming.dto.PaymentRequest",
     "allDeclaredConstructors": true,
-    "allPublicMethods": true
+    "allDeclaredFields": true,
+    "allDeclaredMethods": true
   },
   {
     "name": "com.estagiario.gobots.rinha_backend.infrastructure.incoming.dto.PaymentSummaryResponse",
     "allDeclaredConstructors": true,
-    "allPublicMethods": true
+    "allDeclaredFields": true,
+    "allDeclaredMethods": true
   },
   {
     "name": "com.estagiario.gobots.rinha_backend.infrastructure.incoming.dto.ProcessorSummary",
     "allDeclaredConstructors": true,
-    "allPublicMethods": true
+    "allDeclaredFields": true,
+    "allDeclaredMethods": true
   },
   {
     "name": "com.estagiario.gobots.rinha_backend.infrastructure.incoming.handler.ErrorResponse",
     "allDeclaredConstructors": true,
-    "allPublicMethods": true
+    "allDeclaredFields": true,
+    "allDeclaredMethods": true
   },
   {
     "name": "com.estagiario.gobots.rinha_backend.infrastructure.client.dto.ProcessorPaymentRequest",
     "allDeclaredConstructors": true,
-    "allPublicMethods": true
+    "allDeclaredFields": true,
+    "allDeclaredMethods": true
   },
   {
     "name": "com.estagiario.gobots.rinha_backend.infrastructure.client.dto.ProcessorPaymentResponse",
     "allDeclaredConstructors": true,
-    "allPublicMethods": true
+    "allDeclaredFields": true,
+    "allDeclaredMethods": true
   },
   {
     "name": "com.estagiario.gobots.rinha_backend.infrastructure.client.dto.ProcessorHealthResponse",
     "allDeclaredConstructors": true,
+    "allDeclaredFields": true,
+    "allDeclaredMethods": true
+  },
+  {
+    "name": "com.mongodb.ConnectionString",
+    "allDeclaredConstructors": true,
+    "allPublicConstructors": true,
+    "allDeclaredFields": true,
+    "allPublicFields": true,
+    "allDeclaredMethods": true,
+    "allPublicMethods": true
+  },
+  {
+    "name": "org.springframework.boot.autoconfigure.mongo.PropertiesMongoConnectionDetails",
+    "allDeclaredConstructors": true,
+    "allPublicConstructors": true,
+    "allDeclaredFields": true,
+    "allPublicFields": true,
+    "allDeclaredMethods": true,
+    "allPublicMethods": true
+  },
+  {
+    "name": "org.springframework.boot.autoconfigure.mongo.MongoConnectionDetails",
+    "allDeclaredConstructors": true,
+    "allPublicConstructors": true,
+    "allDeclaredFields": true,
+    "allPublicFields": true,
+    "allDeclaredMethods": true,
+    "allPublicMethods": true
+  },
+  {
+    "name": "org.springframework.data.mongodb.core.ReactiveMongoTemplate",
+    "allDeclaredConstructors": true,
+    "allPublicConstructors": true,
+    "allDeclaredFields": true,
+    "allPublicFields": true,
+    "allDeclaredMethods": true,
+    "allPublicMethods": true
+  },
+  {
+    "name": "org.springframework.data.mongodb.ReactiveMongoDatabaseFactory",
+    "allDeclaredConstructors": true,
+    "allPublicConstructors": true,
+    "allDeclaredFields": true,
+    "allPublicFields": true,
+    "allDeclaredMethods": true,
+    "allPublicMethods": true
+  },
+  {
+    "name": "org.springframework.data.mongodb.core.SimpleReactiveMongoDatabaseFactory",
+    "allDeclaredConstructors": true,
+    "allPublicConstructors": true,
+    "allDeclaredFields": true,
+    "allPublicFields": true,
+    "allDeclaredMethods": true,
+    "allPublicMethods": true
+  },
+  {
+    "name": "org.springframework.data.mongodb.ReactiveMongoTransactionManager",
+    "allDeclaredConstructors": true,
+    "allPublicConstructors": true,
+    "allDeclaredFields": true,
+    "allPublicFields": true,
+    "allDeclaredMethods": true,
+    "allPublicMethods": true
+  },
+  {
+    "name": "org.springframework.transaction.reactive.TransactionalOperator",
+    "allDeclaredConstructors": true,
+    "allPublicConstructors": true,
+    "allDeclaredFields": true,
+    "allPublicFields": true,
+    "allDeclaredMethods": true,
+    "allPublicMethods": true
+  },
+  {
+    "name": "com.mongodb.reactivestreams.client.internal.MongoClientImpl",
+    "allDeclaredConstructors": true,
+    "allPublicConstructors": true,
+    "allDeclaredFields": true,
+    "allPublicFields": true,
+    "allDeclaredMethods": true,
+    "allPublicMethods": true
+  },
+  {
+    "name": "com.mongodb.internal.connection.DefaultClusterFactory",
+    "allDeclaredConstructors": true,
+    "allPublicConstructors": true,
+    "allDeclaredFields": true,
+    "allPublicFields": true,
+    "allDeclaredMethods": true,
     "allPublicMethods": true
   }
 ]

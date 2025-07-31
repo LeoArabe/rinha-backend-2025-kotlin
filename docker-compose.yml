@@ -1,7 +1,6 @@
 version: '3.8'
 
 services:
-  # Serviços de infraestrutura
   mongo:
     image: mongo:7.0
     container_name: mongo
@@ -11,12 +10,10 @@ services:
       - MONGO_INITDB_DATABASE=rinhaDB
     volumes:
       - mongo_data:/data/db
-    # Comando para iniciar o MongoDB como replica set e bind_ip_all para acessibilidade
     command: --replSet rs0 --bind_ip_all --logpath /dev/null --quiet
     networks:
       - rinha-network
     healthcheck:
-      # Health check inteligente para replica set
       test: |
         mongosh --host mongo:27017 --quiet --eval "
           try {
@@ -65,29 +62,23 @@ services:
           cpus: "0.4"
           memory: "100M"
 
-  # APIs (api01, api02) - AGORA USARÃO O ENTRYPOINT DO DOCKERFILE
   api01: &api-template
     build: .
     hostname: api01
     environment:
-      - INSTANCE_ID=API-1
-      - WORKER_CONCURRENCY=16
-      # Variáveis para controle de logging via ambiente (definidas no application.yml)
-      - LOGGING_LEVEL_COM_ESTAGIARIO_GOBOTS=DEBUG
-      - LOGGING_LEVEL_ORG_SPRINGFRAMEWORK_DATA_MONGODB=DEBUG
-      # URLs dos processadores de pagamento (se não incluídos, pode apontar para mocks ou serviços externos)
-      - PROCESSOR_DEFAULT_URL=http://localhost:8001 # Exemplo, ajuste se tiver mocks locais
-      - PROCESSOR_FALLBACK_URL=http://localhost:8002 # Exemplo, ajuste se tiver mocks locais
+      - SPRING_PROFILES_ACTIVE=prod
+      - spring.data.mongodb.uri=mongodb://mongo:27017/rinhaDB?replicaSet=rs0
+      - spring.data.redis.host=redis
+      - spring.data.redis.port=6379
+      - app.processors.default.url=http://payment-processor-default:8080
+      - app.processors.fallback.url=http://payment-processor-fallback:8080
+      - app.instance-id=API-1
     ports:
-      - "8081:8080" # Mapeamento de porta para acesso externo
+      - "8081:8080"
     restart: always
     networks:
       - rinha-network
-      # A rede 'payment-processor' foi removida das dependências das APIs,
-      # pois os serviços de processador não estão mais neste compose.
-      # Se você ainda quer que a API tente se conectar a processadores que estão noutro compose,
-      # remova o comentário e altere 'payment-processor' para o nome da rede externa.
-      # - payment-processor # REMOVIDO OU ADICIONE SE FOR REDE EXTERNA
+      - payment-processor
     depends_on:
       mongo:
         condition: service_healthy
@@ -106,15 +97,12 @@ services:
       start_period: 30s
 
   api02:
-    <<: *api-template # Reusa as configurações do template
+    <<: *api-template
     hostname: api02
     ports:
-      - "8082:8080" # Mapeamento de porta específico para api02
+      - "8082:8080"
     environment:
-      - INSTANCE_ID=API-2 # Sobrescreve apenas o ID da instância
-      - WORKER_CONCURRENCY=16
-      - LOGGING_LEVEL_COM_ESTAGIARIO_GOBOTS=DEBUG
-      - LOGGING_LEVEL_ORG_SPRINGFRAMEWORK_DATA_MONGODB=DEBUG
+      - INSTANCE_ID=API-2
 
   nginx:
     image: nginx:alpine
@@ -138,6 +126,6 @@ volumes:
 networks:
   rinha-network:
     driver: bridge
-  payment-processor: # REMOVIDO SE NÃO USAR REDE LOCAL PARA PROCESSADORES
+  payment-processor:
     driver: bridge
-    external: true # ADICIONE SE A REDE VIER DE OUTRO COMPOSE E JA TIVER SIDO CRIADA
+    external: true

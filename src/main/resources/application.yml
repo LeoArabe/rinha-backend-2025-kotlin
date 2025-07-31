@@ -101,12 +101,12 @@ logging:
     org.springframework.data.mongodb.core.ReactiveMongoTemplate: ${LOGGING_LEVEL_ORG_SPRINGFRAMEWORK_DATA_MONGODB:WARN}
     org.springframework.data.redis: WARN
     reactor.netty: WARN
-    org.mongodb.driver: ERROR
+    org.mongodb.driver: WARN
     org.springframework.web: WARN
     org.springframework.boot: WARN
 
   pattern:
-    console: "%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
+    console: "%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n" # Padrão mais detalhado para debug, mas você pode usar o padrão do perfil prod.
 
 ---
 # Profile de Produção (usado nos containers)

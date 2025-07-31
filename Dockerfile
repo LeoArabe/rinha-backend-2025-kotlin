@@ -41,5 +41,10 @@ COPY --from=builder /app/build/native/nativeCompile/rinha-backend-app /app
 
 EXPOSE 8080
 
-# >>>>> ENTRYPOINT SIMPLIFICADO: Apenas inicia a app, configurações vêm do docker-compose.yml <<<<<
-ENTRYPOINT ["/app", "--spring.profiles.active=prod"]
+# >>>>> ENTRYPOINT FINAL E CORRETO <<<<<
+# Executa o binário nativo (/app) e força todas as configurações via argumentos
+ENTRYPOINT ["/app", \
+            "--spring.profiles.active=prod", \
+            "--spring.data.mongodb.uri=mongodb://root:password@mongo:27017/rinhaDB?replicaSet=rs0", \
+            "--spring.redis.host=redis", \
+            "--spring.redis.port=6379"]

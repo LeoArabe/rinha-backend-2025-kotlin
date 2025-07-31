@@ -30,7 +30,7 @@ class PaymentServiceImpl(
 
         try {
             // Usa a função de extensão para transação ACID
-            transactionalOperator.executeAndAwait { _ -> // <-- MUDANÇA AQUI: 'trx' renomeado para '_'
+            transactionalOperator.executeAndAwait { _ -> // 'trx' renomeado para '_'
                 logger.debug { "📝 Criando entidade de pagamento dentro da transação..." }
                 val payment = request.toDomainEntity()
                 logger.info { "✅ Payment criado: ID=${payment.correlationId}, Status=${payment.status}, Amount=${payment.amount}" }
@@ -41,6 +41,7 @@ class PaymentServiceImpl(
 
                 logger.debug { "📤 Criando evento de pagamento (dentro da transação)..." }
                 val paymentEvent = PaymentEvent.newProcessPaymentEvent(payment.correlationId)
+                // CORREÇÃO AQUI: Usando correlationId, não paymentId
                 logger.info { "✅ PaymentEvent criado: ID=${paymentEvent.id}, CorrelationID=${paymentEvent.correlationId}" }
 
                 logger.debug { "💾 Salvando evento no repositório (dentro da transação)..." }

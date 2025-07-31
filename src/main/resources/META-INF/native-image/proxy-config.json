@@ -1,12 +1,23 @@
 [
-  [
-    "com.mongodb.reactivestreams.client.MongoDatabase",
-    "org.springframework.aop.SpringProxy",
-    "org.springframework.core.DecoratingProxy"
-  ],
-  [
-    "com.mongodb.reactivestreams.client.MongoCollection",
-    "org.springframework.aop.SpringProxy",
-    "org.springframework.core.DecoratingProxy"
-  ]
+  {
+    "interfaces": [
+      "com.mongodb.reactivestreams.client.MongoDatabase",
+      "org.springframework.aop.SpringProxy",
+      "org.springframework.core.DecoratingProxy"
+    ]
+  },
+  {
+    "interfaces": [
+      "com.mongodb.reactivestreams.client.MongoCollection",
+      "org.springframework.aop.SpringProxy",
+      "org.springframework.core.DecoratingProxy"
+    ]
+  },
+  {
+    "interfaces": [
+      "org.springframework.boot.autoconfigure.mongo.MongoReactiveAutoConfiguration$MongoClientSettingsConfiguration",
+      "org.springframework.aop.SpringProxy",
+      "org.springframework.core.DecoratingProxy"
+    ]
+  }
 ]

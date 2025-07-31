@@ -1,11 +1,12 @@
 package com.estagiario.gobots.rinha_backend.application.service.impl
 
-import kotlinx.coroutines.reactor.awaitSingle // <-- ADICIONE ESTE IMPORT
+import kotlinx.coroutines.reactor.awaitSingle
 import kotlinx.coroutines.reactor.awaitSingleOrNull
 import kotlinx.coroutines.reactor.mono
 import org.springframework.transaction.ReactiveTransaction
 import org.springframework.transaction.reactive.TransactionalOperator
-import reactor.core.publisher.Flux // Importe Flux se ainda não estiver importado
+import reactor.core.publisher.Flux
+import reactor.core.publisher.Mono
 
 
 /**
@@ -16,4 +17,4 @@ suspend inline fun <T> TransactionalOperator.executeAndAwait(
     crossinline action: suspend (ReactiveTransaction) -> T
 ): T = execute { trx ->
     mono { action(trx) }
-}.single().awaitSingle() // <-- CORREÇÃO AQUI: Adicionado .single() para converter Flux em Mono
+}.single().awaitSingle() // CORREÇÃO: Adicionado .single() para converter Flux em Mono
