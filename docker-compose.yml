@@ -18,11 +18,8 @@ services:
         mongosh --host mongo:27017 --quiet --eval "
           try {
             const status = rs.status();
-            if (status.myState === 1 || status.myState === 2) {
-              quit(0);
-            } else {
-              quit(1);
-            }
+            if (status.myState === 1 || status.myState === 2) quit(0);
+            else quit(1);
           } catch (e) {
             rs.initiate({ _id: 'rs0', members: [{ _id: 0, host: 'mongo:27017' }] });
             quit(1);
@@ -35,7 +32,7 @@ services:
       resources:
         limits:
           cpus: "0.5"
-          memory: "512M"
+          memory: "140M" # Ajustado para os limites da Rinha
 
   redis:
     image: redis:7.2-alpine
@@ -44,7 +41,7 @@ services:
     restart: unless-stopped
     command: >
       redis-server
-      --maxmemory 90mb
+      --maxmemory 80mb
       --maxmemory-policy allkeys-lru
       --save ""
       --appendonly no
@@ -60,12 +57,13 @@ services:
       resources:
         limits:
           cpus: "0.4"
-          memory: "100M"
+          memory: "90M" # Ajustado para os limites da Rinha
 
   api01: &api-template
     build: .
     hostname: api01
     environment:
+      # ✅ As configurações são definidas aqui, a única fonte da verdade
       - SPRING_PROFILES_ACTIVE=prod
       - spring.data.mongodb.uri=mongodb://mongo:27017/rinhaDB?replicaSet=rs0
       - spring.data.redis.host=redis
@@ -88,9 +86,9 @@ services:
       resources:
         limits:
           cpus: "0.25"
-          memory: "155M"
+          memory: "55M" # Ajustado para os limites da Rinha
     healthcheck:
-      test: [ "CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/actuator/health" ]
+      test: [ "CMD", "curl", "-f", "http://localhost:8080/actuator/health" ]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -102,7 +100,13 @@ services:
     ports:
       - "8082:8080"
     environment:
-      - INSTANCE_ID=API-2
+      - SPRING_PROFILES_ACTIVE=prod
+      - spring.data.mongodb.uri=mongodb://mongo:27017/rinhaDB?replicaSet=rs0
+      - spring.data.redis.host=redis
+      - spring.data.redis.port=6379
+      - app.processors.default.url=http://payment-processor-default:8080
+      - app.processors.fallback.url=http://payment-processor-fallback:8080
+      - app.instance-id=API-2
 
   nginx:
     image: nginx:alpine
@@ -119,6 +123,11 @@ services:
         condition: service_healthy
     networks:
       - rinha-network
+    deploy:
+      resources:
+        limits:
+          cpus: "0.1"
+          memory: "30M" # Ajustado para os limites da Rinha
 
 volumes:
   mongo_data:
@@ -127,5 +136,5 @@ networks:
   rinha-network:
     driver: bridge
   payment-processor:
-    driver: bridge
+    name: payment-processor
     external: true

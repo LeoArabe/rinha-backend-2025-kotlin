@@ -1,26 +1,22 @@
-// src/main/kotlin/com/estagiario/gobots/rinha_backend/infrastructure/incoming/controller/PaymentController.kt
-
 package com.estagiario.gobots.rinha_backend.infrastructure.incoming.controller
 
 import com.estagiario.gobots.rinha_backend.application.service.PaymentService
 import com.estagiario.gobots.rinha_backend.infrastructure.incoming.dto.PaymentRequest
 import jakarta.validation.Valid
-import mu.KotlinLogging
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
+import reactor.core.publisher.Mono
 
 @RestController
 @RequestMapping("/payments")
 class PaymentController(private val paymentService: PaymentService) {
-    private val logger = KotlinLogging.logger {} // Adicione o logger
-
+    // ...
     @PostMapping
-    suspend fun createPayment(@Valid @RequestBody request: PaymentRequest): ResponseEntity<Void> {
-        logger.info { "--> [API] Recebida intenção de pagamento: ${request.correlationId}" }
-        paymentService.processNewPayment(request)
-        return ResponseEntity.accepted().build()
+    fun createPayment(@Valid @RequestBody request: PaymentRequest): Mono<ResponseEntity<Void>> {
+        return paymentService.processNewPayment(request)
+            .thenReturn(ResponseEntity.accepted().build())
     }
 }

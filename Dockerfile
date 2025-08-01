@@ -16,35 +16,28 @@ COPY src src
 
 # Build do executável nativo e otimização
 RUN ./gradlew nativeCompile --no-daemon \
-    -Dspring.aot.jvmArgs="-XX:+UnlockExperimentalVMOptions -XX:+UseZGC -XX:+UseTransparentHugePages" \
-    -Dspring.native.buildArgs="--optimize=2 -H:+UnlockExperimentalVMOptions -H:+UseContainerSupport" \
-    && ls -la build/native/nativeCompile/rinha-backend-app \
     && strip build/native/nativeCompile/rinha-backend-app
 
-# Stage 2: Preparar dependências de runtime (libz.so.1)
-FROM ubuntu:22.04 AS runtime_deps_builder
+# ---
 
-# Primeiro, atualiza o apt-get
-RUN apt-get update
+# Stage 2: Runtime com uma base slim, segura e funcional
+FROM debian:stable-slim
 
-# Depois, instala a biblioteca (usando --no-install-recommends que é mais robusto) e limpa
-RUN apt-get install -y --no-install-recommends zlib1g && rm -rf /var/lib/apt/lists/*
+# Instala apenas as dependências de runtime estritamente necessárias
+# ✅ GARANTE que 'curl' existe para o healthcheck
+RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
 
-# Stage 3: Runtime ultra-minimal com glibc e libz.so.1
-FROM gcr.io/distroless/base:nonroot
+# Cria um usuário não-root para máxima segurança
+RUN useradd --user-group --create-home --shell /bin/false nonroot
+USER nonroot:nonroot
 
-# Copiar libz.so.1 da stage 'runtime_deps_builder' para o local esperado
-COPY --from=runtime_deps_builder /lib/x86_64-linux-gnu/libz.so.1 /usr/lib/libz.so.1
+WORKDIR /app
 
-# Copiar apenas o executável otimizado da stage 'builder'
-COPY --from=builder /app/build/native/nativeCompile/rinha-backend-app /app
+# Copia apenas o executável otimizado da stage 'builder'
+COPY --from=builder /app/build/native/nativeCompile/rinha-backend-app .
 
 EXPOSE 8080
 
-# >>>>> ENTRYPOINT FINAL E CORRETO <<<<<
-# Executa o binário nativo (/app) e força todas as configurações via argumentos
-ENTRYPOINT ["/app", \
-            "--spring.profiles.active=prod", \
-            "--spring.data.mongodb.uri=mongodb://root:password@mongo:27017/rinhaDB?replicaSet=rs0", \
-            "--spring.redis.host=redis", \
-            "--spring.redis.port=6379"]
+# O ENTRYPOINT apenas executa a aplicação.
+# As configurações e o healthcheck são geridos pelo docker-compose.
+ENTRYPOINT ["/app/rinha-backend-app"]
