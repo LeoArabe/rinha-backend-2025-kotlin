@@ -1,11 +1,13 @@
+// CAMINHO: src/main/kotlin/com/estagiario/gobots/rinha_backend/application/worker/OutboxRelay.kt
+
 package com.estagiario.gobots.rinha_backend.application.worker
 
-// >>>>> IMPORTS CORRIGIDOS <<<<<
 import com.estagiario.gobots.rinha_backend.domain.PaymentEventStatus
 import com.estagiario.gobots.rinha_backend.infrastructure.outgoing.repository.PaymentEventRepository
 import com.estagiario.gobots.rinha_backend.infrastructure.outgoing.repository.PaymentRepository
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.reactive.asFlow
 import kotlinx.coroutines.reactor.awaitSingleOrNull
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
@@ -14,11 +16,8 @@ import org.springframework.beans.factory.annotation.Value
 import org.springframework.data.redis.core.ReactiveStringRedisTemplate
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Component
-import reactor.core.publisher.Mono
 import java.time.Duration
-import java.time.Instant
 import java.util.concurrent.atomic.AtomicBoolean
-// >>>>> FIM DOS IMPORTS CORRIGIDOS <<<<<
 
 @Component
 class OutboxRelay(
@@ -26,180 +25,92 @@ class OutboxRelay(
     private val paymentRepository: PaymentRepository,
     private val paymentProcessorWorker: PaymentProcessorWorker,
     private val redisTemplate: ReactiveStringRedisTemplate,
-    @Value("\${app.instance-id:API-1}") private val instanceId: String
+    @Value("\${app.instance-id:API-LOCAL}") private val instanceId: String,
+    @Value("\${app.outbox.leader-ttl-seconds:5}") private val leaderTtl: Long
 ) {
 
     private val logger = KotlinLogging.logger {}
     private val isProcessing = AtomicBoolean(false)
     private val leaderKey = "rinha:leader:outbox-processor"
+    private val processingScope = CoroutineScope(Dispatchers.Default + SupervisorJob() + CoroutineName("OutboxRelay"))
 
-    // Coroutine scope para operações assíncronas
-    private val processingScope = CoroutineScope(
-        Dispatchers.Default + SupervisorJob() + CoroutineName("OutboxRelay")
-    )
-
-    /**
-     * CORREÇÃO PRINCIPAL: Scheduler agora é uma função regular que delega
-     * o trabalho assíncrono para uma coroutine.
-     */
-    @Scheduled(fixedDelay = 200) // Verifica por novos eventos a cada 200ms
-    fun processOutboxEvents() {
-        // Evita processamento concorrente
+    @Scheduled(fixedDelayString = "\${app.outbox.processing-delay-ms:200}")
+    fun scheduleOutboxProcessing() {
         if (!isProcessing.compareAndSet(false, true)) {
-            logger.debug { "Processamento já em andamento, pulando..." }
             return
         }
-
         processingScope.launch {
             try {
-                // Leader election para evitar processamento duplicado entre instâncias
                 if (tryToBecomeLeader()) {
-                    logger.debug { "Instância $instanceId é o líder do Outbox. Processando eventos..." }
-                    processEventsAsync()
-                } else {
-                    logger.trace { "Instância $instanceId não é o líder do Outbox. Pulando processamento." }
+                    processEvents()
                 }
-            } catch (e: Exception) {
-                logger.error(e) { "Erro não tratado no processamento do Outbox" }
             } finally {
                 isProcessing.set(false)
             }
         }
     }
 
-    /**
-     * NOVO: Lógica principal de processamento movida para função suspensa
-     */
-    private suspend fun processEventsAsync() {
+    private suspend fun processEvents() {
         try {
-            // Busca eventos pendentes
+            // ✅ CORREÇÃO: Converte o Flux<PaymentEvent> retornado pelo repositório para um Flow de corrotinas.
             val pendingEvents = paymentEventRepository
                 .findAllByStatus(PaymentEventStatus.PENDING)
+                .asFlow()
                 .toList()
 
-            if (pendingEvents.isEmpty()) {
-                logger.trace { "Nenhum evento pendente encontrado" }
-                return
-            }
+            if (pendingEvents.isEmpty()) return
 
             logger.info { "Encontrados ${pendingEvents.size} eventos no Outbox para processar." }
 
-            // Busca os pagamentos relacionados em uma única query
             val correlationIds = pendingEvents.map { it.correlationId }
+            // ✅ CORREÇÃO: Converte o Flux<Payment> para Flow<Payment> e depois para um mapa.
             val paymentsMap = paymentRepository
                 .findAllByCorrelationIdIn(correlationIds)
+                .asFlow()
                 .toList()
                 .associateBy { it.correlationId }
 
-            // Processa eventos em paralelo com controle de concorrência
-            val processedCount = processEventsInParallel(pendingEvents, paymentsMap)
-
-            logger.info { "Processamento do Outbox concluído: $processedCount/${pendingEvents.size} eventos processados" }
+            val processedCount = processInParallel(pendingEvents, paymentsMap)
+            logger.info { "Processamento do Outbox concluído: $processedCount/${pendingEvents.size} eventos processados." }
 
         } catch (e: Exception) {
-            logger.error(e) { "Falha no processamento dos eventos do Outbox" }
-            // Não relança a exceção para não quebrar o scheduler
+            logger.error(e) { "Falha crítica durante o processamento de eventos do Outbox" }
         }
     }
 
-    /**
-     * OTIMIZAÇÃO: Processa eventos em paralelo com limite de concorrência
-     */
-    private suspend fun processEventsInParallel(
-        pendingEvents: List<com.estagiario.gobots.rinha_backend.domain.PaymentEvent>,
-        paymentsMap: Map<String, com.estagiario.gobots.rinha_backend.domain.Payment>
+    private suspend fun processInParallel(
+        events: List<com.estagiario.gobots.rinha_backend.domain.PaymentEvent>,
+        payments: Map<String, com.estagiario.gobots.rinha_backend.domain.Payment>
     ): Int = coroutineScope {
-        val semaphore = Semaphore(permits = 16) // Máximo 16 processamentos paralelos
-
-        val jobs = pendingEvents.map { event ->
+        val semaphore = Semaphore(permits = 16)
+        events.map { event ->
             async {
                 semaphore.withPermit {
-                    val payment = paymentsMap[event.correlationId]
-                    if (payment != null) {
+                    payments[event.correlationId]?.let { payment ->
                         try {
                             paymentProcessorWorker.processPaymentFromQueue(event, payment)
-                            logger.debug { "Evento ${event.id} processado com sucesso" }
-                            1 // >>>>> CORREÇÃO: RETORNO EXPLÍCITO <<<<<
+                            1
                         } catch (e: Exception) {
-                            logger.warn(e) { "Falha ao processar evento ${event.id} (correlationId=${event.correlationId})" }
-                            0 // >>>>> CORREÇÃO: RETORNO EXPLÍCITO <<<<<
+                            logger.warn(e) { "Falha ao processar o evento ${event.id} para o pagamento ${payment.correlationId}" }
+                            0
                         }
-                    } else {
-                        logger.warn { "Payment para o evento ${event.id} (correlationId=${event.correlationId}) não encontrado. Possível evento órfão." }
-                        // TODO: Implementar dead letter queue para eventos órfãos
-                        markEventAsOrphan(event)
-                        0 // >>>>> CORREÇÃO: RETORNO EXPLÍCITO <<<<<
+                    } ?: run {
+                        logger.warn { "Payment para o evento ${event.id} (correlationId=${event.correlationId}) não encontrado." }
+                        0
                     }
                 }
             }
-        }
-
-        // Aguarda todos os jobs e soma os sucessos
-        jobs.awaitAll().sum()
+        }.awaitAll().sum()
     }
 
-    /**
-     * NOVO: Leader election usando Redis para coordenação entre instâncias
-     */
     private suspend fun tryToBecomeLeader(): Boolean {
         return try {
-            val acquired = redisTemplate.opsForValue()
-                .setIfAbsent(leaderKey, instanceId, Duration.ofSeconds(10)) // Aumentado TTL para 10s para ser consistente com o app.leader-election.ttl-seconds
+            redisTemplate.opsForValue()
+                .setIfAbsent(leaderKey, instanceId, Duration.ofSeconds(leaderTtl))
                 .awaitSingleOrNull() ?: false
-
-            if (acquired) {
-                logger.trace { "Lock de liderança adquirido para Outbox por $instanceId" }
-            }
-
-            acquired
         } catch (e: Exception) {
-            logger.warn(e) { "Falha ao tentar adquirir liderança do Outbox. Processando localmente." }
-            true // Em caso de falha no Redis, processa localmente para garantir funcionamento
+            logger.warn(e) { "Falha ao comunicar com o Redis para eleição de líder. Assumindo liderança localmente." }
+            true
         }
-    }
-
-    /**
-     * NOVO: Marca eventos órfãos para investigação posterior
-     */
-    private suspend fun markEventAsOrphan(event: com.estagiario.gobots.rinha_backend.domain.PaymentEvent) {
-        try {
-            // Em um sistema real, moveríamos para uma "dead letter queue"
-            // Por ora, apenas logamos e marcamos como processado para evitar loop infinito
-            val orphanEvent = event.copy(
-                status = PaymentEventStatus.PROCESSED,
-                processedAt = Instant.now()
-            )
-            paymentEventRepository.save(orphanEvent)
-            logger.warn { "Evento órfão ${event.id} marcado como processado para evitar reprocessamento" }
-        } catch (e: Exception) {
-            logger.error(e) { "Falha ao marcar evento órfão ${event.id}" }
-        }
-    }
-
-    /**
-     * NOVO: Limpeza de recursos quando o componente é destruído
-     */
-    @jakarta.annotation.PreDestroy
-    fun cleanup() {
-        logger.info { "Encerrando OutboxRelay..." }
-        processingScope.cancel("Aplicação sendo encerrada")
-
-        // Libera o lock de liderança se estivermos com ele
-        try {
-            redisTemplate.delete(leaderKey).subscribe()
-        } catch (e: Exception) {
-            logger.debug(e) { "Falha ao liberar lock de liderança na destruição" }
-        }
-    }
-
-    /**
-     * NOVO: Métricas e monitoramento
-     */
-    fun getProcessingStatus(): Map<String, Any> {
-        return mapOf(
-            "isProcessing" to isProcessing.get(),
-            "instanceId" to instanceId,
-            "scopeActive" to processingScope.isActive
-        )
     }
 }

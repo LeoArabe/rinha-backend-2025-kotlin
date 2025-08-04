@@ -7,6 +7,7 @@ import com.estagiario.gobots.rinha_backend.infrastructure.outgoing.repository.Pa
 import mu.KotlinLogging
 import org.springframework.stereotype.Component
 import org.springframework.transaction.annotation.Transactional
+import org.springframework.transaction.support.TransactionSynchronizationManager
 
 @Component
 class TransactionalPersistenceWorker(
@@ -15,24 +16,29 @@ class TransactionalPersistenceWorker(
 ) {
     private val logger = KotlinLogging.logger {}
 
-    /**
-     * Este método é o coração da nossa estratégia de persistência.
-     * * A anotação @Transactional aqui é ativada corretamente porque este
-     * método é chamado a partir de um bean externo (o PaymentServiceImpl).
-     * Isto garante que o Spring AOP crie um proxy transacional.
-     *
-     * As duas operações .save() dentro deste método são executadas de forma atómica:
-     * ou ambas são bem-sucedidas (commit), ou ambas são desfeitas (rollback).
-     */
     @Transactional
     suspend fun savePaymentAndEvent(request: PaymentRequest) {
+        val correlationId = request.correlationId
+
+        // LOG ESTRATÉGICO 4: A PROVA FINAL
+        // Este log é a "arma fumegante". Ele vai nos dizer se o Spring
+        // realmente iniciou uma transação para este método.
+        val isTransactionActive = TransactionSynchronizationManager.isActualTransactionActive()
+        logger.info { "🔎 [ID: $correlationId] Verificando transação. Está ativa? $isTransactionActive" }
+
+        if (!isTransactionActive) {
+            logger.error { "🔥 [ID: $correlationId] ALERTA CRÍTICO: O método @Transactional foi chamado, MAS NÃO HÁ TRANSAÇÃO ATIVA. O contexto foi perdido!" }
+        }
+
         val payment = request.toDomainEntity()
         paymentRepository.save(payment)
 
         val paymentEvent = PaymentEvent.newProcessPaymentEvent(payment.correlationId)
         paymentEventRepository.save(paymentEvent)
 
-        // Este log agora é 100% fiável. Se ele for impresso, a transação foi bem-sucedida.
-        logger.info { "🎉 Transação para ${request.correlationId} commitada com sucesso!" }
+        // LOG ESTRATÉGICO 5: MUDANÇA DE SEMÂNTICA
+        // Como você sugeriu, este log agora indica que o trabalho foi concluído
+        // e a transação será marcada para commit.
+        logger.info { "🎉 [ID: $correlationId] Bloco transacional concluído. Marcando para commit." }
     }
 }
