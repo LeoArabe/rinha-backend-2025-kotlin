@@ -1,146 +1,71 @@
-# Configurações da Aplicação Rinha Backend 2025
-# Otimizada para GraalVM Native e alta performance
+# Caminho: src/main/resources/application.yml
 
+# ===================================================================
+# CONFIGURAÇÃO ÚNICA E SIMPLIFICADA
+# ===================================================================
 server:
-  port: ${APP_PORT:8080}
-  netty:
-    connection-timeout: 2s
-    h2c-max-content-length: 1KB
-  compression:
-    enabled: false # Sem compressão para payloads pequenos da Rinha
+  port: 8080
 
 spring:
   application:
     name: rinha-backend-2025
 
-  # Configuração MongoDB Reativa
+  # --- Configuração de Persistência ---
   data:
     mongodb:
-      uri: ${SPRING_DATA_MONGODB_URI:mongodb://localhost:27017/rinhaDB}
-      auto-index-creation: true
+      # ✅ CORREÇÃO: Usa um placeholder não-conflitante (MONGODB_URI)
+      uri: ${MONGODB_URI:mongodb://mongo:27017/rinhaDB?replicaSet=rs0}
+      auto-index-creation: false
 
-  # Configuração Redis Reativa
-  redis:
-    host: ${REDIS_HOST:localhost}
-    port: ${REDIS_PORT:6379}
-    timeout: 1s
-    lettuce:
-      pool:
-        max-active: 20
-        max-idle: 10
-        min-idle: 2
-      shutdown-timeout: 1s
+    redis:
+      host: ${REDIS_HOST:redis}
+      port: ${REDIS_PORT:6379}
+      timeout: 3s
+      lettuce:
+        pool:
+          max-active: 32
+          max-idle: 16
+          min-idle: 4
 
-  # WebFlux Configurações
-  webflux:
-    base-path: /
-
-  # Actuator para Health Checks
+  # --- Actuator para Health Checks ---
   management:
     endpoints:
       web:
         exposure:
           include: health,info
-        base-path: /actuator
     endpoint:
       health:
         show-details: when-authorized
-    health:
-      redis:
-        enabled: true
-      mongo:
-        enabled: true
 
-# Configurações dos Payment Processors
+# ===================================================================
+# Configurações Específicas da Aplicação
+# ===================================================================
 payment:
   processors:
     default:
       url: ${PROCESSOR_DEFAULT_URL:http://payment-processor-default:8080}
-      fee-percentage: 0.05
-      name: "default"
     fallback:
       url: ${PROCESSOR_FALLBACK_URL:http://payment-processor-fallback:8080}
-      fee-percentage: 0.15
-      name: "fallback"
 
-  # Configurações do Circuit Breaker
+  # ✅ CORREÇÃO: Bloco de configuração que estava em falta adicionado
   circuit-breaker:
-    failure-threshold: ${CIRCUIT_BREAKER_FAILURE_THRESHOLD:5}
-    recovery-timeout-seconds: ${CIRCUIT_BREAKER_RECOVERY_TIMEOUT:30}
-    request-timeout-seconds: ${CIRCUIT_BREAKER_REQUEST_TIMEOUT:4}
+    request-timeout-seconds: ${PAYMENT_REQUEST_TIMEOUT_SECONDS:4}
+    failure-threshold: 5
+    recovery-timeout-seconds: 30
 
-  # Configurações dos Workers
-  workers:
-    concurrency: ${WORKER_CONCURRENCY:16}
-    health-check-interval-seconds: 5
-    retry-max-attempts: 3
-    retry-backoff-seconds: 2
-
-# Configurações de Instância (para Leader Election)
 app:
-  instance-id: ${INSTANCE_ID:API-1}
-  leader-election:
-    key: "rinha:leader:health-checker"
-    ttl-seconds: 10
+  instance-id: ${INSTANCE_ID} # Será fornecido pelo docker-compose
+  outbox:
+    processing-delay-ms: 200
+    leader-ttl-seconds: 5
 
-# Logging otimizado para GraalVM
+
+# ===================================================================
+# LOGS ESTRATÉGICOS (MANTIDOS PARA GARANTIR A VERIFICAÇÃO)
+# ===================================================================
 logging:
   level:
+    org.springframework.data.mongodb: DEBUG
+    org.mongodb.driver: DEBUG
     com.estagiario.gobots.rinha_backend: INFO
-    org.springframework.data.mongodb: WARN
-    org.springframework.data.redis: WARN
-    reactor.netty: WARN
-    org.mongodb.driver: ERROR
-  pattern:
-    console: "%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
-
----
-# Profile de Produção (usado nos containers)
-spring:
-  config:
-    activate:
-      on-profile: prod
-
-  # MongoDB otimizado para produção
-  data:
-    mongodb:
-      uri: ${SPRING_DATA_MONGODB_URI}
-      auto-index-creation: false
-
-  # Redis otimizado para produção
-  redis:
-    host: ${REDIS_HOST:redis}
-    port: ${REDIS_PORT:6379}
-    lettuce:
-      pool:
-        max-active: 32
-        max-idle: 16
-        min-idle: 4
-
-# Logging mínimo em produção
-logging:
-  level:
     root: WARN
-    com.estagiario.gobots.rinha_backend: INFO
-  pattern:
-    console: "%d{HH:mm:ss} %-5level [%thread] %logger{25} - %msg%n"
-
----
-# Profile de desenvolvimento/teste
-spring:
-  config:
-    activate:
-      on-profile: dev
-
-# Configurações locais para desenvolvimento
-payment:
-  processors:
-    default:
-      url: ${PROCESSOR_DEFAULT_URL:http://localhost:8001}
-    fallback:
-      url: ${PROCESSOR_FALLBACK_URL:http://localhost:8002}
-
-logging:
-  level:
-    com.estagiario.gobots.rinha_backend: DEBUG
-    reactor.netty.http: DEBUG

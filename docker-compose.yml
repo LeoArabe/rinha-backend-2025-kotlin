@@ -1,85 +1,26 @@
+# Caminho: docker-compose.yml
+
+version: '3.8'
+
 services:
-  api01: &api
-    build: .
-    hostname: api01
-    environment:
-      - SPRING_PROFILES_ACTIVE=prod
-      # >>>>> CORREÇÃO NA URI: Adicionado o parâmetro ?replicaSet=rs0 <<<<<
-      - SPRING_DATA_MONGODB_URI=mongodb://mongo:27017/rinhaDB?replicaSet=rs0
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - PROCESSOR_DEFAULT_URL=http://payment-processor-default:8080
-      - PROCESSOR_FALLBACK_URL=http://payment-processor-fallback:8080
-      - INSTANCE_ID=API-1
-    restart: always
-    networks:
-      - rinha
-      - payment-processor
-    depends_on:
-      mongo:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    deploy:
-      resources:
-        limits:
-          cpus: "0.25"
-          memory: "55M"
-
-  api02:
-    <<: *api
-    hostname: api02
-    environment:
-      - INSTANCE_ID=API-2
-      # >>>>> CORREÇÃO NA URI: Adicionado o parâmetro ?replicaSet=rs0 <<<<<
-      - SPRING_DATA_MONGODB_URI=mongodb://mongo:27017/rinhaDB?replicaSet=rs0
-
-  nginx:
-    image: nginx:alpine
-    volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf:ro
-    ports:
-      - "9999:9999"
-    depends_on:
-      - api01
-      - api02
-    networks:
-      - rinha
-    deploy:
-      resources:
-        limits:
-          cpus: "0.1"
-          memory: "20M"
-
   mongo:
-    image: mongo:6.0
+    image: mongo:7.0
     container_name: mongo
     hostname: mongo
-    ports:
-      - "27017:27017"
-    environment:
-      - MONGO_INITDB_DATABASE=rinhaDB
+    restart: unless-stopped
+    command: --replSet rs0 --bind_ip_all
     volumes:
       - mongo_data:/data/db
-    # Comando para iniciar o MongoDB já em modo replica set
-    command: --replSet rs0 --bind_ip localhost,mongo
     networks:
-      - rinha
+      - rinha-network
     healthcheck:
-      # VERSÃO FINAL: Inicia o replica set explicitamente E verifica se está PRONTO
-      # para aceitar transações, resolvendo a condição de corrida de forma definitiva.
       test: |
         mongosh --host mongo:27017 --quiet --eval "
           try {
             const status = rs.status();
-            // Retorna sucesso (0) se for PRIMARY (1) ou SECONDARY (2)
-            if (status.myState === 1 || status.myState === 2) {
-              quit(0);
-            } else {
-              quit(1);
-            }
+            if (status.myState === 1 || status.myState === 2) quit(0);
+            else quit(1);
           } catch (e) {
-            // Se rs.status() falhar, inicia o replica set com a configuração explícita
             rs.initiate({ _id: 'rs0', members: [{ _id: 0, host: 'mongo:27017' }] });
             quit(1);
           }"
@@ -91,38 +32,104 @@ services:
       resources:
         limits:
           cpus: "0.5"
-          memory: "120M"
+          memory: "350M"
+
   redis:
-    image: redis:7-alpine
+    image: redis:7.2-alpine
     container_name: redis
     hostname: redis
+    restart: unless-stopped
     command: >
       redis-server
-      --maxmemory 90mb
+      --maxmemory 80mb
       --maxmemory-policy allkeys-lru
       --save ""
       --appendonly no
     networks:
-      - rinha
+      - rinha-network
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
-      timeout: 3s
+      timeout: 5s
       retries: 5
-      start_period: 10s
+      start_period: 20s
     deploy:
       resources:
         limits:
           cpus: "0.4"
-          memory: "100M"
+          memory: "90M"
+
+  api01: &api-template
+    build: .
+    hostname: api01
+    environment:
+      # ✅ SIMPLIFICADO: Apenas as variáveis que realmente precisam de ser sobrescritas
+      - MONGODB_URI=mongodb://mongo:27017/rinhaDB?replicaSet=rs0
+      - REDIS_HOST=redis
+      - PROCESSOR_DEFAULT_URL=http://payment-processor-default:8080
+      - PROCESSOR_FALLBACK_URL=http://payment-processor-fallback:8080
+      - INSTANCE_ID=API-1
+    ports:
+      - "8081:8080"
+    restart: always
+    networks:
+      - rinha-network
+      - payment-processor
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: "55M"
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8080/actuator/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  api02:
+    <<: *api-template
+    hostname: api02
+    ports:
+      - "8082:8080"
+    networks:
+      - rinha-network
+      - payment-processor
+    environment:
+      - MONGODB_URI=mongodb://mongo:27017/rinhaDB?replicaSet=rs0
+      - REDIS_HOST=redis
+      - PROCESSOR_DEFAULT_URL=http://payment-processor-default:8080
+      - PROCESSOR_FALLBACK_URL=http://payment-processor-fallback:8080
+      - INSTANCE_ID=API-2
+
+  nginx:
+    image: nginx:alpine
+    container_name: nginx
+    restart: unless-stopped
+    ports:
+      - "9999:9999"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      api01:
+        condition: service_healthy
+      api02:
+        condition: service_healthy
+    networks:
+      - rinha-network
 
 volumes:
   mongo_data:
-    driver: local
 
 networks:
-  rinha:
+  rinha-network:
     driver: bridge
+  # Adicione esta linha para conectar com os processadores:
   payment-processor:
-    name: payment-processor
     external: true
+    name: payment-processor

@@ -1,0 +1,44 @@
+[
+  {
+    "name": "com.estagiario.gobots.rinha_backend.infrastructure.incoming.dto.PaymentRequest",
+    "allDeclaredConstructors": true,
+    "allDeclaredFields": true,
+    "allDeclaredMethods": true
+  },
+  {
+    "name": "com.estagiario.gobots.rinha_backend.infrastructure.incoming.dto.PaymentSummaryResponse",
+    "allDeclaredConstructors": true,
+    "allDeclaredFields": true,
+    "allDeclaredMethods": true
+  },
+  {
+    "name": "com.estagiario.gobots.rinha_backend.infrastructure.incoming.dto.ProcessorSummary",
+    "allDeclaredConstructors": true,
+    "allDeclaredFields": true,
+    "allDeclaredMethods": true
+  },
+  {
+    "name": "com.estagiario.gobots.rinha_backend.infrastructure.incoming.handler.ErrorResponse",
+    "allDeclaredConstructors": true,
+    "allDeclaredFields": true,
+    "allDeclaredMethods": true
+  },
+  {
+    "name": "com.estagiario.gobots.rinha_backend.infrastructure.client.dto.ProcessorPaymentRequest",
+    "allDeclaredConstructors": true,
+    "allDeclaredFields": true,
+    "allDeclaredMethods": true
+  },
+  {
+    "name": "com.estagiario.gobots.rinha_backend.infrastructure.client.dto.ProcessorPaymentResponse",
+    "allDeclaredConstructors": true,
+    "allDeclaredFields": true,
+    "allDeclaredMethods": true
+  },
+  {
+    "name": "com.estagiario.gobots.rinha_backend.infrastructure.client.dto.ProcessorHealthResponse",
+    "allDeclaredConstructors": true,
+    "allDeclaredFields": true,
+    "allDeclaredMethods": true
+  }
+]
