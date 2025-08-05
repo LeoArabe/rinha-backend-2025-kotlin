@@ -8,8 +8,8 @@ import com.estagiario.gobots.rinha_backend.domain.Payment
 import com.estagiario.gobots.rinha_backend.domain.PaymentStatus
 import com.estagiario.gobots.rinha_backend.infrastructure.incoming.dto.PaymentRequest
 import com.estagiario.gobots.rinha_backend.infrastructure.outgoing.repository.PaymentRepository
-import jakarta.validation.Valid
 import mu.KotlinLogging
+import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
@@ -18,7 +18,6 @@ import org.springframework.web.bind.annotation.RestController
 import reactor.core.publisher.Mono
 import java.math.BigDecimal
 import java.time.Instant
-import java.lang.Void // Importação explícita para o tipo Void do Java
 
 @RestController
 @RequestMapping("/payments")
@@ -30,27 +29,30 @@ class PaymentController(
     private val logger = KotlinLogging.logger {}
 
     @PostMapping
-    fun createPayment(@Valid @RequestBody request: PaymentRequest): Mono<ResponseEntity<Void>> {
+    fun createPayment(@RequestBody request: PaymentRequest): Mono<ResponseEntity<Any>> {
+        logger.info { "🎯 CONTROLLER RECEBEU: ${request.correlationId}" }
+
         return paymentService.processNewPayment(request)
-            .thenReturn(ResponseEntity.accepted().build<Void>())
+            .doOnSuccess { logger.info { "🎯 SERVICE RETORNOU SUCESSO para ${request.correlationId}" } }
+            .then(Mono.just(ResponseEntity.accepted().build<Any>()))
+            .doOnError { logger.error(it) { "🎯 CONTROLLER ERRO: ${it.message}" } }
+            .onErrorReturn(ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).build())
     }
 
-    // ✅ ENDPOINT DE TESTE REESCRITO PARA SER 100% REATIVO
     @PostMapping("/test")
     fun testMongoPersistence(): Mono<ResponseEntity<String>> {
         logger.info { "🧪 Executando teste de persistência 100% reativo..." }
 
-        val testPayment = Payment(
-            correlationId = "test-${Instant.now().toEpochMilli()}", // ID único para cada teste
-            amount = BigDecimal.valueOf(99.99),
-            status = PaymentStatus.RECEBIDO,
-            requestedAt = Instant.now(),
-            lastUpdatedAt = Instant.now()
+        // ✅ CORREÇÃO 1: Usando o seu factory method, como você sugeriu. O código fica mais limpo.
+        val testPayment = Payment.newPayment(
+            correlationId = "test-${Instant.now().toEpochMilli()}",
+            amount = BigDecimal.valueOf(99.99)
         )
 
-        // Este fluxo reativo garante a subscrição e execução
+        // ✅ CORREÇÃO 2: Este fluxo reativo garante a subscrição e a execução.
         return paymentRepository.save(testPayment)
             .map { savedPayment ->
+                // Este bloco SÓ é executado se o save for bem-sucedido.
                 val successMsg = "✅ SUCESSO: Documento persistido com ID: ${savedPayment.correlationId}"
                 logger.info { successMsg }
                 ResponseEntity.status(201).body(successMsg)

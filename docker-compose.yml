@@ -1,3 +1,5 @@
+# Caminho: docker-compose.yml
+
 version: '3.8'
 
 services:
@@ -6,11 +8,9 @@ services:
     container_name: mongo
     hostname: mongo
     restart: unless-stopped
-    environment:
-      - MONGO_INITDB_DATABASE=rinhaDB
+    command: --replSet rs0 --bind_ip_all
     volumes:
       - mongo_data:/data/db
-    command: --replSet rs0 --bind_ip_all --logpath /dev/null --quiet
     networks:
       - rinha-network
     healthcheck:
@@ -32,7 +32,7 @@ services:
       resources:
         limits:
           cpus: "0.5"
-          memory: "140M" # Ajustado para os limites da Rinha
+          memory: "350M"
 
   redis:
     image: redis:7.2-alpine
@@ -57,20 +57,18 @@ services:
       resources:
         limits:
           cpus: "0.4"
-          memory: "90M" # Ajustado para os limites da Rinha
+          memory: "90M"
 
   api01: &api-template
     build: .
     hostname: api01
     environment:
-      # ✅ As configurações são definidas aqui, a única fonte da verdade
-      - SPRING_PROFILES_ACTIVE=prod
-      - spring.data.mongodb.uri=mongodb://mongo:27017/rinhaDB?replicaSet=rs0
-      - spring.data.redis.host=redis
-      - spring.data.redis.port=6379
-      - app.processors.default.url=http://payment-processor-default:8080
-      - app.processors.fallback.url=http://payment-processor-fallback:8080
-      - app.instance-id=API-1
+      # ✅ SIMPLIFICADO: Apenas as variáveis que realmente precisam de ser sobrescritas
+      - MONGODB_URI=mongodb://mongo:27017/rinhaDB?replicaSet=rs0
+      - REDIS_HOST=redis
+      - PROCESSOR_DEFAULT_URL=http://payment-processor-default:8080
+      - PROCESSOR_FALLBACK_URL=http://payment-processor-fallback:8080
+      - INSTANCE_ID=API-1
     ports:
       - "8081:8080"
     restart: always
@@ -86,7 +84,7 @@ services:
       resources:
         limits:
           cpus: "0.25"
-          memory: "55M" # Ajustado para os limites da Rinha
+          memory: "55M"
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:8080/actuator/health" ]
       interval: 30s
@@ -99,14 +97,15 @@ services:
     hostname: api02
     ports:
       - "8082:8080"
+    networks:
+      - rinha-network
+      - payment-processor
     environment:
-      - SPRING_PROFILES_ACTIVE=prod
-      - spring.data.mongodb.uri=mongodb://mongo:27017/rinhaDB?replicaSet=rs0
-      - spring.data.redis.host=redis
-      - spring.data.redis.port=6379
-      - app.processors.default.url=http://payment-processor-default:8080
-      - app.processors.fallback.url=http://payment-processor-fallback:8080
-      - app.instance-id=API-2
+      - MONGODB_URI=mongodb://mongo:27017/rinhaDB?replicaSet=rs0
+      - REDIS_HOST=redis
+      - PROCESSOR_DEFAULT_URL=http://payment-processor-default:8080
+      - PROCESSOR_FALLBACK_URL=http://payment-processor-fallback:8080
+      - INSTANCE_ID=API-2
 
   nginx:
     image: nginx:alpine
@@ -123,11 +122,6 @@ services:
         condition: service_healthy
     networks:
       - rinha-network
-    deploy:
-      resources:
-        limits:
-          cpus: "0.1"
-          memory: "30M" # Ajustado para os limites da Rinha
 
 volumes:
   mongo_data:
@@ -135,6 +129,7 @@ volumes:
 networks:
   rinha-network:
     driver: bridge
+  # Adicione esta linha para conectar com os processadores:
   payment-processor:
-    name: payment-processor
     external: true
+    name: payment-processor

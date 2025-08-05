@@ -8,7 +8,7 @@ import org.springframework.transaction.ReactiveTransactionManager
 import org.springframework.transaction.annotation.EnableTransactionManagement // ✅ ADICIONE ESTA IMPORTAÇÃO
 
 @Configuration
-@EnableTransactionManagement // ✅ ADICIONE ESTA ANOTAÇÃO PARA ATIVAR @Transactional
+@EnableTransactionManagement
 class TransactionConfig {
 
     @Bean
@@ -18,5 +18,5 @@ class TransactionConfig {
         return ReactiveMongoTransactionManager(databaseFactory)
     }
 
-    // ❌ O bean do TransactionalOperator não é mais necessário aqui
+    // ❌ REMOVA O BEAN DO TRANSACTIONALOPERATOR COMPLETAMENTE
 }

@@ -1,4 +1,3 @@
-// ATUALIZE ESTE FICHEIRO:
 // src/main/kotlin/com/estagiario/gobots/rinha_backend/application/service/impl/PaymentServiceImpl.kt
 
 package com.estagiario.gobots.rinha_backend.application.service.impl
@@ -9,16 +8,14 @@ import com.estagiario.gobots.rinha_backend.infrastructure.incoming.dto.PaymentRe
 import com.estagiario.gobots.rinha_backend.infrastructure.outgoing.repository.PaymentEventRepository
 import com.estagiario.gobots.rinha_backend.infrastructure.outgoing.repository.PaymentRepository
 import mu.KotlinLogging
-import org.springframework.dao.DuplicateKeyException
 import org.springframework.stereotype.Service
-import org.springframework.transaction.reactive.TransactionalOperator
 import reactor.core.publisher.Mono
 
 @Service
 class PaymentServiceImpl(
     private val paymentRepository: PaymentRepository,
-    private val paymentEventRepository: PaymentEventRepository,
-    private val transactionalOperator: TransactionalOperator
+    private val paymentEventRepository: PaymentEventRepository
+    // ❌ TransactionalOperator removido para contornar problemas do GraalVM
 ) : PaymentService {
 
     private val logger = KotlinLogging.logger {}
@@ -29,25 +26,28 @@ class PaymentServiceImpl(
         val payment = request.toDomainEntity()
         val paymentEvent = PaymentEvent.newProcessPaymentEvent(payment.correlationId)
 
-        // ✅ Fluxo 100% reativo, explícito e à prova de falhas.
-        return transactionalOperator.execute { _ ->
-            paymentRepository.save(payment)
-                .doOnSuccess { logger.info { "✅ Payment salvo: ID=${it.correlationId}" } }
-                .then(paymentEventRepository.save(paymentEvent))
-                .doOnSuccess { logger.info { "✅ PaymentEvent salvo: ID=${it.id}" } }
-        }
-            .then()
+        // ✅ VERSÃO ULTRA-SIMPLIFICADA: Sem tratamento de erro complexo
+        return paymentRepository.save(payment)
+            .doOnNext {
+                logger.info { "✅ Payment salvo com sucesso: ${it.correlationId}" }
+            }
+            .flatMap {
+                logger.info { "🔄 Agora salvando PaymentEvent..." }
+                paymentEventRepository.save(paymentEvent)
+            }
+            .doOnNext {
+                logger.info { "✅ PaymentEvent salvo com sucesso: ${it.id}" }
+            }
             .doOnSuccess {
-                logger.info { "🎉 Transação para ${request.correlationId} commitada com sucesso!" }
+                logger.info { "🎉 SUCESSO TOTAL! Dados persistidos para ${request.correlationId}" }
             }
-            .doOnError(DuplicateKeyException::class.java) {
-                logger.info { "🔄 Pagamento duplicado ${request.correlationId} detetado e ignorado." }
-            }
+            .then()
             .doOnError { error ->
-                if (error !is DuplicateKeyException) {
-                    logger.error(error) { "❌ Erro crítico ao persistir pagamento ${request.correlationId}" }
-                }
+                logger.error(error) { "❌ ERRO GERAL: ${error.message}" }
             }
-            .onErrorResume { Mono.empty() }
+            .onErrorResume { error ->
+                logger.error(error) { "⚠️ Resumindo erro para continuar aplicação" }
+                Mono.empty()
+            }
     }
 }

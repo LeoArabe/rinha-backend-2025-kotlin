@@ -1,160 +1,71 @@
-# Configurações da Aplicação Rinha Backend 2025
-# Otimizada para GraalVM Native e alta performance
+# Caminho: src/main/resources/application.yml
 
+# ===================================================================
+# CONFIGURAÇÃO ÚNICA E SIMPLIFICADA
+# ===================================================================
 server:
-  port: ${APP_PORT:8080}
-  netty:
-    connection-timeout: 2s
-    h2c-max-content-length: 1KB
-  compression:
-    enabled: false # Sem compressão para payloads pequenos da Rinha
+  port: 8080
 
-spring: # ESTE É O BLOCO 'spring' PRINCIPAL
+spring:
   application:
     name: rinha-backend-2025
 
-  native: # MANTIDA ESTA CONFIGURAÇÃO AQUI
-    remove-yaml-support: false
-
-  # Configuração MongoDB Reativa (Default Profile: usa localhost como fallback)
+  # --- Configuração de Persistência ---
   data:
     mongodb:
-      # A URI com replicaSet será passada pelo command no docker-compose.yml
-      uri: ${SPRING_DATA_MONGODB_URI:mongodb://localhost:27017/rinhaDB}
-      auto-index-creation: true
+      # ✅ CORREÇÃO: Usa um placeholder não-conflitante (MONGODB_URI)
+      uri: ${MONGODB_URI:mongodb://mongo:27017/rinhaDB?replicaSet=rs0}
+      auto-index-creation: false
 
-  # Configuração Redis Reativa (Default Profile)
-  redis:
-    host: ${REDIS_HOST:localhost}
-    port: ${REDIS_PORT:6379}
-    timeout: 2s # Timeout para o perfil padrão
-    lettuce:
-      pool:
-        max-active: 8
-        max-wait: -1ms
-        max-idle: 8
-        min-idle: 0
-      shutdown-timeout: 3s
+    redis:
+      host: ${REDIS_HOST:redis}
+      port: ${REDIS_PORT:6379}
+      timeout: 3s
+      lettuce:
+        pool:
+          max-active: 32
+          max-idle: 16
+          min-idle: 4
 
-  # WebFlux Configurações
-  webflux:
-    base-path: /
-
-  # Actuator para Health Checks
+  # --- Actuator para Health Checks ---
   management:
     endpoints:
       web:
         exposure:
-          include: health,info,metrics
-        base-path: /actuator
+          include: health,info
     endpoint:
       health:
-        show-details: always
-    health:
-      redis:
-        enabled: true
-      mongo:
-        enabled: true
+        show-details: when-authorized
 
-# Configurações dos Payment Processors (Default Profile)
+# ===================================================================
+# Configurações Específicas da Aplicação
+# ===================================================================
 payment:
   processors:
     default:
       url: ${PROCESSOR_DEFAULT_URL:http://payment-processor-default:8080}
-      fee-percentage: 0.05
-      name: "default"
     fallback:
       url: ${PROCESSOR_FALLBACK_URL:http://payment-processor-fallback:8080}
-      fee-percentage: 0.15
-      name: "fallback"
 
-  # Configurações do Circuit Breaker (Default Profile)
+  # ✅ CORREÇÃO: Bloco de configuração que estava em falta adicionado
   circuit-breaker:
-    failure-threshold: ${CIRCUIT_BREAKER_FAILURE_THRESHOLD:5}
-    recovery-timeout-seconds: ${CIRCUIT_BREAKER_RECOVERY_TIMEOUT:30}
-    request-timeout-seconds: ${CIRCUIT_BREAKER_REQUEST_TIMEOUT:4}
+    request-timeout-seconds: ${PAYMENT_REQUEST_TIMEOUT_SECONDS:4}
+    failure-threshold: 5
+    recovery-timeout-seconds: 30
 
-  # Configurações dos Workers (Default Profile)
-  workers:
-    concurrency: ${WORKER_CONCURRENCY:16}
-    health-check-interval-seconds: 5
-    retry-max-attempts: 3
-    retry-backoff-seconds: 2
-
-# Configurações de Instância (para Leader Election) (Default Profile)
 app:
-  instance-id: ${INSTANCE_ID:API-1}
-  leader-election:
-    key: "rinha:leader:health-checker"
-    ttl-seconds: 10
+  instance-id: ${INSTANCE_ID} # Será fornecido pelo docker-compose
   outbox:
     processing-delay-ms: 200
-    max-parallel-events: 16
     leader-ttl-seconds: 5
 
-# Logging otimizado para GraalVM (Default Profile)
+
+# ===================================================================
+# LOGS ESTRATÉGICOS (MANTIDOS PARA GARANTIR A VERIFICAÇÃO)
+# ===================================================================
 logging:
   level:
-    root: WARN
-    com.estagiario.gobots.rinha_backend: ${LOGGING_LEVEL_COM_ESTAGIARIO_GOBOTS:INFO}
-    org.springframework.data.mongodb: ${LOGGING_LEVEL_ORG_SPRINGFRAMEWORK_DATA_MONGODB:WARN}
-    org.springframework.data.mongodb.core.ReactiveMongoTemplate: ${LOGGING_LEVEL_ORG_SPRINGFRAMEWORK_DATA_MONGODB:WARN}
-    org.springframework.data.redis: WARN
-    reactor.netty: WARN
-    org.mongodb.driver: WARN
-    org.springframework.web: WARN
-    org.springframework.boot: WARN
-
-  pattern:
-    console: "%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n" # Padrão mais detalhado para debug, mas você pode usar o padrão do perfil prod.
-
----
-# Profile de Produção (usado nos containers)
-spring:
-  config:
-    activate:
-      on-profile: prod
-
-  # MongoDB otimizado para produção (a URI completa virá do command do docker-compose)
-  data:
-    mongodb:
-      uri: ${SPRING_DATA_MONGODB_URI}
-      auto-index-creation: false
-
-  # Redis otimizado para produção (host/port virão do command do docker-compose)
-  redis:
-    host: ${REDIS_HOST:redis}
-    port: ${REDIS_PORT:6379}
-    timeout: 5s
-    lettuce:
-      pool:
-        max-active: 32
-        max-idle: 16
-        min-idle: 4
-
-# Logging em produção (pode ser sobrescrito pelas variáveis de ambiente do Compose)
-logging:
-  level:
-    root: WARN
+    org.springframework.data.mongodb: DEBUG
+    org.mongodb.driver: DEBUG
     com.estagiario.gobots.rinha_backend: INFO
-  pattern:
-    console: "%d{HH:mm:ss} %-5level [%thread] %logger{25} - %msg%n"
-
----
-# Profile de desenvolvimento/teste (para usar localmente, se não Docker)
-spring:
-  config:
-    activate:
-      on-profile: dev
-
-payment:
-  processors:
-    default:
-      url: ${PROCESSOR_DEFAULT_URL:http://localhost:8001}
-    fallback:
-      url: ${PROCESSOR_FALLBACK_URL:http://localhost:8002}
-
-logging:
-  level:
-    com.estagiario.gobots.rinha_backend: DEBUG
-    reactor.netty.http: DEBUG
+    root: WARN
