@@ -65,7 +65,10 @@ app:
 # ===================================================================
 logging:
   level:
-    org.springframework.data.mongodb: DEBUG
-    org.mongodb.driver: DEBUG
+    # ✅ Silencia os logs detalhados do Spring e do driver do Mongo
+    org.springframework: WARN
+    org.mongodb.driver: WARN
+    # ✅ Mantém os seus logs de negócio em INFO (ou mude para WARN para ser ainda mais restrito)
     com.estagiario.gobots.rinha_backend: INFO
+    # ✅ Define o padrão para avisos (WARN) em vez de erros (ERROR)
     root: WARN

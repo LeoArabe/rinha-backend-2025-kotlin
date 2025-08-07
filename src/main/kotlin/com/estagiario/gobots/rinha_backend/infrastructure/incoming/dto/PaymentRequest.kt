@@ -1,46 +1,23 @@
+// CAMINHO: src/main/kotlin/com/estagiario/gobots/rinha_backend/infrastructure/incoming/dto/PaymentRequest.kt
+
 package com.estagiario.gobots.rinha_backend.infrastructure.incoming.dto
 
+import com.estagiario.gobots.rinha_backend.domain.Payment
 import com.fasterxml.jackson.annotation.JsonProperty
 import jakarta.validation.constraints.DecimalMin
 import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.NotNull
 import java.math.BigDecimal
 
-/**
- * DTO de requisição para o endpoint POST /payments
- *
- * Representa a intenção de pagamento enviada pelo cliente.
- * Este DTO é o ponto de entrada do sistema e deve ser extremamente
- * rápido de processar, garantindo apenas validações básicas antes
- * de persistir a intenção e retornar sucesso ao cliente.
- *
- * O processamento real acontece de forma assíncrona em background
- * através do padrão Outbox implementado com PaymentEvent.
- */
 data class PaymentRequest(
-
-    /**
-     * ID único de correlação do pagamento fornecido pelo cliente
-     *
-     * REGRA CRÍTICA: Este ID é usado como chave primária na collection
-     * de payments, garantindo idempotência natural. Se o mesmo correlationId
-     * for enviado múltiplas vezes, o sistema deve lidar de forma consistente.
-     *
-     * Deve ser um UUID válido ou string não vazia fornecida pelo cliente.
-     */
     @JsonProperty("correlationId")
     @field:NotBlank(message = "correlationId é obrigatório e não pode ser vazio")
     val correlationId: String,
 
     /**
-     * Valor do pagamento em formato decimal
-     *
-     * IMPORTANTE: Recebemos como BigDecimal para evitar problemas de
-     * precisão com ponto flutuante. O valor deve ser positivo e
-     * maior que zero (não aceitamos pagamentos de valor zero).
-     *
-     * Exemplos válidos: 19.90, 100.00, 0.01
-     * Exemplos inválidos: 0, -10.50, null
+     * ✅ CORRETO: O DTO recebe o 'amount' como BigDecimal,
+     * exatamente como o cliente envia no JSON (ex: 25.50).
+     * A validação @DecimalMin funciona corretamente aqui.
      */
     @JsonProperty("amount")
     @field:NotNull(message = "amount é obrigatório")
@@ -49,30 +26,17 @@ data class PaymentRequest(
 ) {
 
     /**
-     * Converte este DTO em uma nova entidade Payment do domínio
-     *
-     * Esta é a ponte entre a camada de infraestrutura (DTOs) e
-     * a camada de domínio (entidades). Garante que a conversão
-     * seja explícita e controlada.
-     *
-     * @return Nova instância de Payment no estado RECEBIDO
+     * ✅ CORRETO: A conversão para centavos (Long) acontece aqui, na chamada
+     * para criar a entidade de domínio.
+     * É aqui que 25.50 (BigDecimal) se torna 2550 (Long).
      */
-    fun toDomainEntity(): com.estagiario.gobots.rinha_backend.domain.Payment {
-        return com.estagiario.gobots.rinha_backend.domain.Payment.newPayment(
+    fun toDomainEntity(): Payment {
+        return Payment.newPayment(
             correlationId = this.correlationId,
-            amount = this.amount
+            amount = this.amount.multiply(BigDecimal(100)).toLong()
         )
     }
 
-    /**
-     * Valida se o correlationId tem formato de UUID válido
-     *
-     * OPCIONAL: Validação adicional além das anotações Bean Validation.
-     * Pode ser útil para garantir que o correlationId segue um padrão
-     * específico esperado pelos sistemas clientes.
-     *
-     * @return true se o correlationId é um UUID válido
-     */
     fun hasValidUuidFormat(): Boolean {
         return try {
             java.util.UUID.fromString(correlationId)
@@ -82,14 +46,7 @@ data class PaymentRequest(
         }
     }
 
-    /**
-     * Formata o amount para exibição, removendo zeros desnecessários
-     *
-     * Útil para logs e debugging, garantindo que valores como
-     * 19.90 não apareçam como 19.9000000000 nos logs.
-     *
-     * @return String formatada do valor (ex: "19.90")
-     */
+    // Esta função auxiliar continua útil para logs
     fun getFormattedAmount(): String {
         return amount.stripTrailingZeros().toPlainString()
     }

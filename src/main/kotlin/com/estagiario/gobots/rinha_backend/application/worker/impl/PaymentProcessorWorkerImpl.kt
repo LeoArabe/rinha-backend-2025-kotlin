@@ -1,6 +1,3 @@
-// ATUALIZE ESTE FICHEIRO:
-// src/main/kotlin/com/estagiario/gobots/rinha_backend/application/worker/impl/PaymentProcessorWorkerImpl.kt
-
 package com.estagiario.gobots.rinha_backend.application.worker.impl
 
 import com.estagiario.gobots.rinha_backend.application.client.ProcessorClient
@@ -14,9 +11,9 @@ import com.estagiario.gobots.rinha_backend.infrastructure.client.dto.ProcessorPa
 import com.estagiario.gobots.rinha_backend.infrastructure.outgoing.repository.PaymentEventRepository
 import com.estagiario.gobots.rinha_backend.infrastructure.outgoing.repository.PaymentRepository
 import kotlinx.coroutines.reactor.awaitSingle
-import kotlinx.coroutines.reactor.awaitSingleOrNull
 import mu.KotlinLogging
 import org.springframework.stereotype.Component
+import org.springframework.web.reactive.function.client.WebClientResponseException
 import java.time.Instant
 import kotlin.time.Duration.Companion.seconds
 
@@ -31,18 +28,21 @@ class PaymentProcessorWorkerImpl(
     private val MAX_ATTEMPTS = 3
 
     override suspend fun processPaymentFromQueue(event: PaymentEvent, payment: Payment) {
+        val correlationId = payment.correlationId
+
         if (payment.status.isFinal()) {
-            logger.warn { "Pagamento ${payment.correlationId} já em estado final. Finalizando evento." }
+            logger.warn { "message=\"Evento ignorado, pagamento em estado final\" correlationId=$correlationId currentStatus=${payment.status}" }
             markEventAsProcessed(event)
             return
         }
+
+        logger.info { "message=\"Iniciando processamento de pagamento\" correlationId=$correlationId attempt=${payment.attemptCount + 1}" }
 
         val processingPayment = payment.copy(
             status = PaymentStatus.PROCESSANDO,
             lastUpdatedAt = Instant.now(),
             attemptCount = payment.attemptCount + 1
         )
-        // ✅ CORREÇÃO: Espera o Mono<Payment> ser resolvido para um objeto Payment
         val currentPayment = paymentRepository.save(processingPayment).awaitSingle()
 
         if (tryProcessor("default", currentPayment)) {
@@ -50,15 +50,20 @@ class PaymentProcessorWorkerImpl(
             return
         }
 
+        logger.warn { "message=\"Processador default falhou, tentando fallback\" correlationId=$correlationId" }
+
         if (tryProcessor("fallback", currentPayment)) {
             markEventAsProcessed(event)
             return
         }
     }
 
+    // ✅ ÚNICA VERSÃO CORRETA DO MÉTODO
     private suspend fun tryProcessor(processorName: String, payment: Payment): Boolean {
+        val correlationId = payment.correlationId
         return try {
             val request = ProcessorPaymentRequest.fromPayment(payment)
+
             val processorCall = if (processorName == "default") processorClient::processPaymentDefault else processorClient::processPaymentFallback
             processorCall(request)
 
@@ -67,13 +72,17 @@ class PaymentProcessorWorkerImpl(
                 processorUsed = processorName,
                 lastUpdatedAt = Instant.now()
             )
-            // ✅ CORREÇÃO: Espera o Mono<Payment> ser salvo
             paymentRepository.save(successPayment).awaitSingle()
-            logger.info { "Pagamento ${payment.correlationId} SUCESSO via $processorName" }
+
+            logger.info { "message=\"Pagamento processado com sucesso\" correlationId=$correlationId processor=$processorName" }
             true
         } catch (e: Exception) {
-            logger.warn(e) { "Falha ao processar ${payment.correlationId} via $processorName" }
-            val paymentException = if (e is ProcessorPaymentException) e else ProcessorPaymentException("Network/Timeout Error", 0, e)
+            logger.warn(e) { "message=\"Falha na chamada ao processador externo\" correlationId=$correlationId processor=$processorName error=\"${e.message}\"" }
+
+            // Lógica melhorada para tratar o erro 422
+            val statusCode = (e as? WebClientResponseException)?.statusCode?.value() ?: 0
+            val paymentException = ProcessorPaymentException(e.message ?: "Erro desconhecido", statusCode, e)
+
             handleProcessingFailure(payment, paymentException)
             false
         }
@@ -97,13 +106,11 @@ class PaymentProcessorWorkerImpl(
                 null
             }
         )
-        // ✅ CORREÇÃO: Espera o Mono<Payment> ser salvo
         paymentRepository.save(updatedPayment).awaitSingle()
-        logger.warn { "Pagamento ${payment.correlationId} movido para ${updatedPayment.status} após falha." }
+        logger.warn { "message=\"Pagamento movido para status final\" correlationId=${payment.correlationId} newStatus=$nextStatus reason=\"${exception.message}\"" }
     }
 
     private suspend fun markEventAsProcessed(event: PaymentEvent) {
-        // ✅ CORREÇÃO: Espera o Mono<PaymentEvent> ser salvo
         paymentEventRepository.save(
             event.copy(status = PaymentEventStatus.PROCESSED, processedAt = Instant.now())
         ).awaitSingle()

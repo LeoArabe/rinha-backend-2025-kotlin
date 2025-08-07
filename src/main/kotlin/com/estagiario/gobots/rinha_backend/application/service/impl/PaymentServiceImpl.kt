@@ -21,30 +21,24 @@ class PaymentServiceImpl(
     private val logger = KotlinLogging.logger {}
 
     override fun processNewPayment(request: PaymentRequest): Mono<Void> {
-        logger.info { "🚀 Processando pagamento ${request.correlationId}" }
-
         val payment = request.toDomainEntity()
         val paymentEvent = PaymentEvent.newProcessPaymentEvent(payment.correlationId)
 
-        // ✅ VERSÃO ULTRA-SIMPLIFICADA: Sem tratamento de erro complexo
-        return paymentRepository.save(payment)
-            .doOnNext {
-                logger.info { "✅ Payment salvo com sucesso: ${it.correlationId}" }
-            }
-            .flatMap {
-                logger.info { "🔄 Agora salvando PaymentEvent..." }
-                paymentEventRepository.save(paymentEvent)
-            }
-            .doOnNext {
-                logger.info { "✅ PaymentEvent salvo com sucesso: ${it.id}" }
-            }
-            .doOnSuccess {
-                logger.info { "🎉 SUCESSO TOTAL! Dados persistidos para ${request.correlationId}" }
+        // ✅ Sua lógica reativa está perfeita. Apenas os logs foram padronizados.
+        return Mono.defer {
+            paymentRepository.save(payment)
+                .flatMap { paymentEventRepository.save(paymentEvent) }
+        }
+            .elapsed()
+            .doOnSuccess { elapsedResult ->
+                // ✅ Log estruturado com a latência da operação de escrita no DB
+                logger.info { "message=\"Intenção de pagamento persistida\" correlationId=${request.correlationId} durationMs=${elapsedResult.t1}" }
             }
             .then()
             .doOnError { error ->
-                logger.error(error) { "❌ ERRO GERAL: ${error.message}" }
+                logger.error(error) { "message=\"Falha ao persistir intenção de pagamento\" correlationId=${request.correlationId}" }
             }
+            // A sua lógica de onErrorResume é ótima para produção, pois não para a aplicação.
             .onErrorResume { error ->
                 logger.error(error) { "⚠️ Resumindo erro para continuar aplicação" }
                 Mono.empty()

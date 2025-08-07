@@ -40,5 +40,11 @@
     "allDeclaredConstructors": true,
     "allDeclaredFields": true,
     "allDeclaredMethods": true
+  },
+  {
+    "name": "com.estagiario.gobots.rinha_backend.application.service.impl.SummaryServiceImpl$AggregationResult",
+    "allDeclaredConstructors": true,
+    "allDeclaredFields": true,
+    "allDeclaredMethods": true
   }
 ]
