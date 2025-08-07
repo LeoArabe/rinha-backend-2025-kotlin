@@ -60,7 +60,7 @@ class OutboxRelay(
 
             if (pendingEvents.isEmpty()) return
 
-            logger.info { "Encontrados ${pendingEvents.size} eventos no Outbox para processar." }
+            logger.info { "message=\"Worker encontrou eventos\" count=${pendingEvents.size}" }
 
             val correlationIds = pendingEvents.map { it.correlationId }
             // ✅ CORREÇÃO: Converte o Flux<Payment> para Flow<Payment> e depois para um mapa.
@@ -71,7 +71,7 @@ class OutboxRelay(
                 .associateBy { it.correlationId }
 
             val processedCount = processInParallel(pendingEvents, paymentsMap)
-            logger.info { "Processamento do Outbox concluído: $processedCount/${pendingEvents.size} eventos processados." }
+            logger.info { "message=\"Processamento do batch concluído\" processedCount=$processedCount totalEvents=${pendingEvents.size}" }
 
         } catch (e: Exception) {
             logger.error(e) { "Falha crítica durante o processamento de eventos do Outbox" }

@@ -1,14 +1,13 @@
-# Caminho: docker-compose.yml
-
-version: '3.8'
-
 services:
   mongo:
     image: mongo:7.0
     container_name: mongo
     hostname: mongo
     restart: unless-stopped
-    command: --replSet rs0 --bind_ip_all
+    # ✅ A MUDANÇA CRÍTICA ESTÁ AQUI:
+    # Limitamos o cache interno do MongoDB para 100MB.
+    command: >
+      mongod --replSet rs0 --bind_ip_all --wiredTigerCacheSizeGB 0.1
     volumes:
       - mongo_data:/data/db
     networks:
@@ -32,7 +31,8 @@ services:
       resources:
         limits:
           cpus: "0.5"
-          memory: "350M"
+          # ✅ MEMÓRIA REDUZIDA: Agora o contêiner tem um limite seguro.
+          memory: "150M"
 
   redis:
     image: redis:7.2-alpine
@@ -41,7 +41,7 @@ services:
     restart: unless-stopped
     command: >
       redis-server
-      --maxmemory 80mb
+      --maxmemory 40mb # <-- Reduzido, pois Redis é muito eficiente
       --maxmemory-policy allkeys-lru
       --save ""
       --appendonly no
@@ -56,14 +56,14 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.4"
-          memory: "90M"
+          cpus: "0.2" # <-- CPU um pouco reduzida
+          # ✅ MEMÓRIA REDUZIDA
+          memory: "50M"
 
   api01: &api-template
     build: .
     hostname: api01
     environment:
-      # ✅ SIMPLIFICADO: Apenas as variáveis que realmente precisam de ser sobrescritas
       - MONGODB_URI=mongodb://mongo:27017/rinhaDB?replicaSet=rs0
       - REDIS_HOST=redis
       - PROCESSOR_DEFAULT_URL=http://payment-processor-default:8080
@@ -83,7 +83,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.25"
+          cpus: "0.3" # <-- CPU ajustada
+          # A memória de 55M para GraalVM é ótima.
           memory: "55M"
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:8080/actuator/health" ]
@@ -91,15 +92,17 @@ services:
       timeout: 10s
       retries: 3
       start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        mode: "non-blocking"
+        max-buffer-size: "4m" # Buffer de 4MB em memória
 
   api02:
     <<: *api-template
     hostname: api02
     ports:
       - "8082:8080"
-    networks:
-      - rinha-network
-      - payment-processor
     environment:
       - MONGODB_URI=mongodb://mongo:27017/rinhaDB?replicaSet=rs0
       - REDIS_HOST=redis
@@ -122,6 +125,12 @@ services:
         condition: service_healthy
     networks:
       - rinha-network
+    deploy:
+      resources:
+        limits:
+          cpus: "0.2" # <-- CPU ajustada
+          # ✅ Limite explícito para o Nginx
+          memory: "25M"
 
 volumes:
   mongo_data:

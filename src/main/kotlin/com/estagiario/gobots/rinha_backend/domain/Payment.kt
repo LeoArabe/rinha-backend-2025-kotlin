@@ -3,7 +3,6 @@ package com.estagiario.gobots.rinha_backend.domain
 import org.springframework.data.annotation.Id
 import org.springframework.data.mongodb.core.index.CompoundIndex
 import org.springframework.data.mongodb.core.mapping.Document
-import java.math.BigDecimal
 import java.time.Instant
 
 /**
@@ -15,7 +14,7 @@ data class Payment(
     @Id
     val correlationId: String,
 
-    val amount: BigDecimal,
+    val amount: Long,
 
     val status: PaymentStatus,
 
@@ -25,7 +24,7 @@ data class Payment(
 
     var processorUsed: String? = null,
 
-    var processorFee: BigDecimal? = null,
+    var processorFee: Long? = null,
 
     var attemptCount: Int = 0,
 
@@ -36,7 +35,7 @@ data class Payment(
     var externalTransactionId: String? = null
 ) {
     companion object {
-        fun newPayment(correlationId: String, amount: BigDecimal): Payment {
+        fun newPayment(correlationId: String, amount: Long): Payment {
             val now = Instant.now()
             return Payment(
                 correlationId = correlationId,
