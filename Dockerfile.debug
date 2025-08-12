@@ -15,11 +15,14 @@ RUN ./gradlew nativeCompile --no-daemon \
 # Stage runtime debug: debian-slim com bash & curl
 FROM debian:stable-slim AS debug
 RUN apt-get update && apt-get install -y --no-install-recommends bash curl ca-certificates procps && rm -rf /var/lib/apt/lists/*
-RUN useradd --user-group --create-home --shell /bin/bash devuser
-USER devuser:devuser
+
+# Usar nobody (usuário padrão do sistema)
 WORKDIR /app
 COPY --from=builder /app/build/native/nativeCompile/rinha-backend-app .
 COPY start-app.sh /app/start-app.sh
 RUN chmod +x /app/start-app.sh
+RUN chown -R nobody:nogroup /app
+
+USER nobody:nogroup
 EXPOSE 8080
 ENTRYPOINT ["/bin/bash", "/app/start-app.sh"]
