@@ -1,4 +1,4 @@
-package com.estagiario.gobots.rinha_backend.application.worker
+package com.estagiario.gobots.rinha_backend.domain
 
 import org.springframework.data.annotation.Id
 import org.springframework.data.mongodb.core.mapping.Document

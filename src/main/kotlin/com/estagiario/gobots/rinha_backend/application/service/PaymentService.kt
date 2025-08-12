@@ -1,9 +1,17 @@
 package com.estagiario.gobots.rinha_backend.application.service
 
+import com.estagiario.gobots.rinha_backend.domain.Payment
 import com.estagiario.gobots.rinha_backend.infrastructure.incoming.dto.PaymentRequest
-// ATUALIZE: src/main/kotlin/com/estagiario/gobots/rinha_backend/application/service/PaymentService.kt
 import reactor.core.publisher.Mono
+
+data class HealthStatus(
+    val isHealthy: Boolean,
+    val details: Map<String, Any>
+)
 
 interface PaymentService {
     fun processNewPayment(request: PaymentRequest): Mono<Void>
+    fun performHealthCheck(): Mono<HealthStatus>
+    fun getPaymentStatus(correlationId: String): Mono<Payment>
+    fun testPersistence(): Mono<Void>
 }

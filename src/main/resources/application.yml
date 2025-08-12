@@ -11,8 +11,9 @@ app:
 
   outbox:
     processing-delay-ms: ${APP_OUTBOX_PROCESSING_DELAY_MS:500}
-    batch-size: ${APP_OUTBOX_BATCH_SIZE:10}
-    max-concurrency: ${APP_OUTBOX_MAX_CONCURRENCY:4}
+    batch-size: ${APP_OUTBOX_BATCH_SIZE:15}
+    max-concurrency: ${APP_OUTBOX_MAX_CONCURRENCY:6}
+    lock-timeout-minutes: ${APP_OUTBOX_LOCK_TIMEOUT_MINUTES:5}
 
   health-check:
     delay-ms: ${APP_HEALTH_CHECK_DELAY_MS:5000}
@@ -39,10 +40,10 @@ spring:
     mongodb:
       uri: ${MONGODB_URI:mongodb://mongo:27017/rinhaDB?replicaSet=rs0}
       pool:
-        min-size: ${SPRING_DATA_MONGODB_POOL_MIN_SIZE:3}
-        max-size: ${SPRING_DATA_MONGODB_POOL_MAX_SIZE:15}
-        max-wait-time-ms: ${SPRING_DATA_MONGODB_POOL_MAX_WAIT_TIME_MS:5000}
-        max-idle-time: ${SPRING_DATA_MONGODB_POOL_MAX_IDLE_TIME_MS:30000}
+        min-size: ${SPRING_DATA_MONGODB_POOL_MIN_SIZE:5}
+        max-size: ${SPRING_DATA_MONGODB_POOL_MAX_SIZE:20}
+        max-wait-time-ms: ${SPRING_DATA_MONGODB_POOL_MAX_WAIT_TIME_MS:3000}
+        max-idle-time: ${SPRING_DATA_MONGODB_POOL_MAX_IDLE_TIME_MS:60000}
 
   jackson:
     default-property-inclusion: non_null
@@ -53,6 +54,9 @@ spring:
       max-disk-usage-per-part: ${SPRING_WEBFLUX_MULTIPART_MAX_DISK_PER_PART:0}
 
 payment:
+  retry:
+    max-attempts: ${PAYMENT_RETRY_MAX_ATTEMPTS:3}
+    max-backoff-seconds: ${PAYMENT_RETRY_MAX_BACKOFF_SECONDS:300}
   circuit-breaker:
     request-timeout-seconds: ${PAYMENT_REQUEST_TIMEOUT_SECONDS:4}
     failure-threshold: ${PAYMENT_CIRCUIT_BREAKER_FAILURE_THRESHOLD:5}

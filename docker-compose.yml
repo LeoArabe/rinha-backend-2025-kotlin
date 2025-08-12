@@ -22,9 +22,9 @@ services:
             rs.initiate({ _id: 'rs0', members: [{ _id: 0, host: 'mongo:27017' }] });
             quit(1);
           }"
-      interval: 10s
-      timeout: 10s
-      retries: 10
+      interval: 8s
+      timeout: 5s
+      retries: 15
       start_period: 30s
     deploy:
       resources:
@@ -77,10 +77,10 @@ services:
     healthcheck:
       # roda INSIDE do container (por isso o runtime contém curl)
       test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
-      interval: 15s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 45s
 
   api02:
     build:
@@ -108,10 +108,10 @@ services:
           memory: "70M"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
-      interval: 15s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 45s
 
   nginx:
     image: nginx:alpine

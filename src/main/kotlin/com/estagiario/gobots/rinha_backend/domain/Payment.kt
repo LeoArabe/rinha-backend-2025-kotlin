@@ -1,35 +1,26 @@
 package com.estagiario.gobots.rinha_backend.domain
 
 import org.springframework.data.annotation.Id
-import org.springframework.data.mongodb.core.index.CompoundIndex
+import org.springframework.data.mongodb.core.index.Indexed
 import org.springframework.data.mongodb.core.mapping.Document
 import java.time.Instant
 
-/**
- * Entidade principal Payment - A fonte única da verdade para cada transação.
- */
 @Document("payments")
-// ✅ Seu índice composto está perfeito para a query do summary!
-@CompoundIndex(name = "summary_idx", def = "{'status': 1, 'processorUsed': 1, 'lastUpdatedAt': 1}")
 data class Payment(
     @Id
+    val id: String? = null,
+
+    @Indexed(unique = true)
     val correlationId: String,
 
-    val amount: Long, // Valor em centavos
-
+    val amount: Long,
+    val status: PaymentStatus,
     val requestedAt: Instant,
-
-    // ✅ CORREÇÃO: Campos que mudam durante o ciclo de vida devem ser 'var'
-    var status: PaymentStatus,
-    var lastUpdatedAt: Instant,
-    var processorUsed: String? = null,
-    var attemptCount: Int = 0,
-    var nextRetryAt: Instant? = null,
-    var lastErrorMessage: String? = null,
-
-    // ✅ ADIÇÃO ESTRATÉGICA: Campos para robustez e auditoria
-    var processorFee: Long? = null,
-    var externalTransactionId: String? = null
+    val lastUpdatedAt: Instant,
+    val processorUsed: String? = null,
+    val lastErrorMessage: String? = null,
+    val attemptCount: Int = 0,
+    val nextRetryAt: Instant? = null
 ) {
     companion object {
         fun newPayment(correlationId: String, amount: Long): Payment {
@@ -42,5 +33,12 @@ data class Payment(
                 lastUpdatedAt = now
             )
         }
+    }
+
+    // ✅ PROPRIEDADE COMPUTED para compatibilidade com o controller
+    val createdAt: Instant get() = requestedAt
+
+    fun toBigDecimal(): java.math.BigDecimal {
+        return java.math.BigDecimal(amount).divide(java.math.BigDecimal(100))
     }
 }

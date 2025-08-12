@@ -1,53 +1,51 @@
-// CAMINHO: src/main/kotlin/com/estagiario/gobots/rinha_backend/infrastructure/incoming/dto/PaymentRequest.kt
-
 package com.estagiario.gobots.rinha_backend.infrastructure.incoming.dto
 
 import com.estagiario.gobots.rinha_backend.domain.Payment
-import com.fasterxml.jackson.annotation.JsonProperty
-import jakarta.validation.constraints.DecimalMin
 import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.NotNull
+import jakarta.validation.constraints.Positive
 import java.math.BigDecimal
+import java.text.DecimalFormat
+import java.util.*
 
 data class PaymentRequest(
-    @JsonProperty("correlationId")
-    @field:NotBlank(message = "correlationId é obrigatório e não pode ser vazio")
+    @field:NotBlank(message = "correlationId é obrigatório")
     val correlationId: String,
 
-    /**
-     * ✅ CORRETO: O DTO recebe o 'amount' como BigDecimal,
-     * exatamente como o cliente envia no JSON (ex: 25.50).
-     * A validação @DecimalMin funciona corretamente aqui.
-     */
-    @JsonProperty("amount")
     @field:NotNull(message = "amount é obrigatório")
-    @field:DecimalMin(value = "0.01", message = "amount deve ser maior que zero")
+    @field:Positive(message = "amount deve ser positivo")
     val amount: BigDecimal
 ) {
-
     /**
-     * ✅ CORRETO: A conversão para centavos (Long) acontece aqui, na chamada
-     * para criar a entidade de domínio.
-     * É aqui que 25.50 (BigDecimal) se torna 2550 (Long).
+     * Valida se o correlationId é um UUID válido
      */
-    fun toDomainEntity(): Payment {
-        return Payment.newPayment(
-            correlationId = this.correlationId,
-            amount = this.amount.multiply(BigDecimal(100)).toLong()
-        )
-    }
-
     fun hasValidUuidFormat(): Boolean {
         return try {
-            java.util.UUID.fromString(correlationId)
+            UUID.fromString(correlationId)
             true
         } catch (e: IllegalArgumentException) {
             false
         }
     }
 
-    // Esta função auxiliar continua útil para logs
+    /**
+     * Formata o valor para exibição em logs (formato brasileiro)
+     */
     fun getFormattedAmount(): String {
-        return amount.stripTrailingZeros().toPlainString()
+        val formatter = DecimalFormat.getCurrencyInstance(Locale.of("pt", "BR"))
+        return formatter.format(amount)
+    }
+
+    /**
+     * Converte o DTO para a entidade de domínio Payment
+     * Converte o valor de BigDecimal (com decimais) para centavos (Long)
+     */
+    fun toDomainEntity(): Payment {
+        // Multiplica por 100 para converter reais em centavos
+        val amountInCents = amount.multiply(BigDecimal.valueOf(100)).toLong()
+        return Payment.newPayment(
+            correlationId = correlationId,
+            amount = amountInCents
+        )
     }
 }
