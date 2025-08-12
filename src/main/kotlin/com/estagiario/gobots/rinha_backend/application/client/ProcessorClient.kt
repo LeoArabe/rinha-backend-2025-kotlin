@@ -3,10 +3,11 @@ package com.estagiario.gobots.rinha_backend.application.client
 import com.estagiario.gobots.rinha_backend.infrastructure.client.dto.ProcessorHealthResponse
 import com.estagiario.gobots.rinha_backend.infrastructure.client.dto.ProcessorPaymentRequest
 import com.estagiario.gobots.rinha_backend.infrastructure.client.dto.ProcessorPaymentResponse
+import reactor.core.publisher.Mono
 
 interface ProcessorClient {
-    suspend fun checkDefaultProcessorHealth(): ProcessorHealthResponse
-    suspend fun checkFallbackProcessorHealth(): ProcessorHealthResponse
-    suspend fun processPaymentDefault(request: ProcessorPaymentRequest): ProcessorPaymentResponse
-    suspend fun processPaymentFallback(request: ProcessorPaymentRequest): ProcessorPaymentResponse
+    fun processPaymentDefault(request: ProcessorPaymentRequest): Mono<ProcessorPaymentResponse>
+    fun processPaymentFallback(request: ProcessorPaymentRequest): Mono<ProcessorPaymentResponse>
+    fun checkDefaultProcessorHealth(): Mono<ProcessorHealthResponse>
+    fun checkFallbackProcessorHealth(): Mono<ProcessorHealthResponse>
 }

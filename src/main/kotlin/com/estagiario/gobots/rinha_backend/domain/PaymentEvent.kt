@@ -1,15 +1,14 @@
 package com.estagiario.gobots.rinha_backend.domain
 
 import org.springframework.data.annotation.Id
+import org.springframework.data.mongodb.core.index.CompoundIndex
 import org.springframework.data.mongodb.core.index.Indexed
 import org.springframework.data.mongodb.core.mapping.Document
 import java.time.Instant
 import java.util.UUID
 
-/**
- * SIMPLIFICADO: Evento para o Outbox Pattern - apenas um "gatilho" descartável.
- */
 @Document("payment_outbox")
+@CompoundIndex(name = "status_created_at_idx", def = "{'status': 1, 'createdAt': 1}")
 data class PaymentEvent(
     @Id
     val id: String = UUID.randomUUID().toString(),
@@ -21,8 +20,13 @@ data class PaymentEvent(
 
     val createdAt: Instant = Instant.now(),
 
-    @Indexed
     var status: PaymentEventStatus = PaymentEventStatus.PENDING,
+
+    // novo: owner para claim atômico
+    var owner: String? = null,
+
+    // novo: quando o worker marcou como em processamento
+    var processingAt: Instant? = null,
 
     var processedAt: Instant? = null
 ) {
@@ -42,5 +46,6 @@ enum class PaymentEventType {
 
 enum class PaymentEventStatus {
     PENDING,
+    PROCESSING,
     PROCESSED
 }

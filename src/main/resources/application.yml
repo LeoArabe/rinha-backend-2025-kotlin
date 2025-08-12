@@ -1,74 +1,69 @@
-# Caminho: src/main/resources/application.yml
-
-# ===================================================================
-# CONFIGURAÇÃO ÚNICA E SIMPLIFICADA
-# ===================================================================
 server:
-  port: 8080
+  port: ${SERVER_PORT:8080}
+  netty:
+    connection-timeout: 2s
+    h2c-max-content-length: 0KB
 
-spring:
-  application:
-    name: rinha-backend-2025
+app:
+  instance-id: ${INSTANCE_ID:API-LOCAL}
+  run-mode: ${APP_RUN_MODE:api}
+  fail-on-persist-error: ${APP_FAIL_ON_PERSIST_ERROR:false}
 
-  # --- Configuração de Persistência ---
-  data:
-    mongodb:
-      # ✅ CORREÇÃO: Usa um placeholder não-conflitante (MONGODB_URI)
-      uri: ${MONGODB_URI:mongodb://mongo:27017/rinhaDB?replicaSet=rs0}
-      auto-index-creation: false
+  outbox:
+    processing-delay-ms: ${APP_OUTBOX_PROCESSING_DELAY_MS:500}
+    batch-size: ${APP_OUTBOX_BATCH_SIZE:10}
+    max-concurrency: ${APP_OUTBOX_MAX_CONCURRENCY:4}
 
-    redis:
-      host: ${REDIS_HOST:redis}
-      port: ${REDIS_PORT:6379}
-      timeout: 3s
-      lettuce:
-        pool:
-          max-active: 32
-          max-idle: 16
-          min-idle: 4
+  health-check:
+    delay-ms: ${APP_HEALTH_CHECK_DELAY_MS:5000}
+    leader-ttl-seconds: ${APP_HEALTH_LEADER_TTL_SECONDS:10}
 
-  # --- Actuator para Health Checks ---
-  management:
-    endpoints:
-      web:
-        exposure:
-          include: health,info
-    endpoint:
-      health:
-        show-details: when-authorized
-
-# ===================================================================
-# Configurações Específicas da Aplicação
-# ===================================================================
-payment:
-  processors:
+  processor:
     default:
       url: ${PROCESSOR_DEFAULT_URL:http://payment-processor-default:8080}
     fallback:
       url: ${PROCESSOR_FALLBACK_URL:http://payment-processor-fallback:8080}
 
-  # ✅ CORREÇÃO: Bloco de configuração que estava em falta adicionado
+  http:
+    connect-timeout-ms: ${APP_HTTP_CONNECT_TIMEOUT_MS:2000}
+    max-in-memory-bytes: ${APP_HTTP_MAX_IN_MEMORY_BYTES:16777216}
+
+  summary:
+    timeout-seconds: ${APP_SUMMARY_TIMEOUT_SECONDS:8}
+
+spring:
+  application:
+    name: rinha-backend-2025
+
+  data:
+    mongodb:
+      uri: ${MONGODB_URI:mongodb://mongo:27017/rinhaDB?replicaSet=rs0}
+      pool:
+        min-size: ${SPRING_DATA_MONGODB_POOL_MIN_SIZE:3}
+        max-size: ${SPRING_DATA_MONGODB_POOL_MAX_SIZE:15}
+        max-wait-time-ms: ${SPRING_DATA_MONGODB_POOL_MAX_WAIT_TIME_MS:5000}
+        max-idle-time: ${SPRING_DATA_MONGODB_POOL_MAX_IDLE_TIME_MS:30000}
+
+  jackson:
+    default-property-inclusion: non_null
+
+  webflux:
+    multipart:
+      max-in-memory-size: ${SPRING_WEBFLUX_MULTIPART_MAX_IN_MEMORY_BYTES:10240}
+      max-disk-usage-per-part: ${SPRING_WEBFLUX_MULTIPART_MAX_DISK_PER_PART:0}
+
+payment:
   circuit-breaker:
     request-timeout-seconds: ${PAYMENT_REQUEST_TIMEOUT_SECONDS:4}
-    failure-threshold: 5
-    recovery-timeout-seconds: 30
+    failure-threshold: ${PAYMENT_CIRCUIT_BREAKER_FAILURE_THRESHOLD:5}
+    recovery-timeout-seconds: ${PAYMENT_CIRCUIT_BREAKER_RECOVERY_SECONDS:30}
 
-app:
-  instance-id: ${INSTANCE_ID} # Será fornecido pelo docker-compose
-  outbox:
-    processing-delay-ms: 200
-    leader-ttl-seconds: 5
-
-
-# ===================================================================
-# LOGS ESTRATÉGICOS (MANTIDOS PARA GARANTIR A VERIFICAÇÃO)
-# ===================================================================
 logging:
   level:
-    # ✅ Silencia os logs detalhados do Spring e do driver do Mongo
-    org.springframework: WARN
-    org.mongodb.driver: WARN
-    # ✅ Mantém os seus logs de negócio em INFO (ou mude para WARN para ser ainda mais restrito)
-    com.estagiario.gobots.rinha_backend: INFO
-    # ✅ Define o padrão para avisos (WARN) em vez de erros (ERROR)
-    root: WARN
+    org.springframework: ${LOG_LEVEL_SPRING:WARN}
+    org.mongodb.driver: ${LOG_LEVEL_MONGO:ERROR}
+    reactor.netty: ${LOG_LEVEL_REACTOR_NETTY:ERROR}
+    com.estagiario.gobots.rinha_backend: ${LOG_LEVEL_APP:INFO}
+    root: ${LOG_LEVEL_ROOT:WARN}
+  pattern:
+    console: "%d{HH:mm:ss.SSS} [%thread] %-5level %logger - %msg%n"

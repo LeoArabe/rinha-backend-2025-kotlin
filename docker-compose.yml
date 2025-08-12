@@ -1,13 +1,12 @@
+version: '3.8'
+
 services:
   mongo:
     image: mongo:7.0
-    container_name: mongo
     hostname: mongo
     restart: unless-stopped
-    # ✅ A MUDANÇA CRÍTICA ESTÁ AQUI:
-    # Limitamos o cache interno do MongoDB para 100MB.
     command: >
-      mongod --replSet rs0 --bind_ip_all --wiredTigerCacheSizeGB 0.1
+      mongod --replSet rs0 --bind_ip_all --wiredTigerCacheSizeGB 0.25
     volumes:
       - mongo_data:/data/db
     networks:
@@ -30,90 +29,92 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.5"
-          # ✅ MEMÓRIA REDUZIDA: Agora o contêiner tem um limite seguro.
-          memory: "150M"
+          cpus: "0.6"
+          memory: "260M"
 
-  redis:
-    image: redis:7.2-alpine
-    container_name: redis
-    hostname: redis
-    restart: unless-stopped
-    command: >
-      redis-server
-      --maxmemory 40mb # <-- Reduzido, pois Redis é muito eficiente
-      --maxmemory-policy allkeys-lru
-      --save ""
-      --appendonly no
-    networks:
-      - rinha-network
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 20s
-    deploy:
-      resources:
-        limits:
-          cpus: "0.2" # <-- CPU um pouco reduzida
-          # ✅ MEMÓRIA REDUZIDA
-          memory: "50M"
-
-  api01: &api-template
-    build: .
-    hostname: api01
-    environment:
-      - MONGODB_URI=mongodb://mongo:27017/rinhaDB?replicaSet=rs0
-      - REDIS_HOST=redis
-      - PROCESSOR_DEFAULT_URL=http://payment-processor-default:8080
-      - PROCESSOR_FALLBACK_URL=http://payment-processor-fallback:8080
-      - INSTANCE_ID=API-1
-    ports:
-      - "8081:8080"
-    restart: always
-    networks:
-      - rinha-network
-      - payment-processor
+  mongo-setup:
+    image: mongo:7.0
+    # Não nomeamos container para evitar conflitos em reruns
     depends_on:
       mongo:
         condition: service_healthy
-      redis:
-        condition: service_healthy
+    volumes:
+      - ./setup-mongo.sh:/setup-mongo.sh:ro
+    networks:
+      - rinha-network
+    environment:
+      - MONGO_HOST=mongo
+      - MONGO_PORT=27017
+      - DB_NAME=rinhaDB
+      - SKIP_DROP=false
+    entrypoint: ["bash", "/setup-mongo.sh"]
+    restart: "no"
+
+  api01:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    hostname: api01
+    depends_on:
+      mongo-setup:
+        condition: service_completed_successfully
+    environment:
+      - MONGODB_URI=mongodb://mongo:27017/rinhaDB?replicaSet=rs0&retryWrites=true&w=majority
+      - PROCESSOR_DEFAULT_URL=http://payment-processor-default:8080
+      - PROCESSOR_FALLBACK_URL=http://payment-processor-fallback:8080
+      - INSTANCE_ID=API-1
+      - APP_RUN_MODE=hybrid
+      - SERVER_PORT=8080
+      - SPRING_PROFILES_ACTIVE=prod
+    networks:
+      - rinha-network
+      - payment-processor
     deploy:
       resources:
         limits:
-          cpus: "0.3" # <-- CPU ajustada
-          # A memória de 55M para GraalVM é ótima.
-          memory: "55M"
+          cpus: "0.4"
+          memory: "70M"
     healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:8080/actuator/health" ]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+      # roda INSIDE do container (por isso o runtime contém curl)
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
       start_period: 30s
-    logging:
-      driver: "json-file"
-      options:
-        mode: "non-blocking"
-        max-buffer-size: "4m" # Buffer de 4MB em memória
 
   api02:
-    <<: *api-template
+    build:
+      context: .
+      dockerfile: Dockerfile
     hostname: api02
-    ports:
-      - "8082:8080"
+    depends_on:
+      mongo-setup:
+        condition: service_completed_successfully
     environment:
-      - MONGODB_URI=mongodb://mongo:27017/rinhaDB?replicaSet=rs0
-      - REDIS_HOST=redis
+      - MONGODB_URI=mongodb://mongo:27017/rinhaDB?replicaSet=rs0&retryWrites=true&w=majority
       - PROCESSOR_DEFAULT_URL=http://payment-processor-default:8080
       - PROCESSOR_FALLBACK_URL=http://payment-processor-fallback:8080
       - INSTANCE_ID=API-2
+      - APP_RUN_MODE=api
+      - SERVER_PORT=8080
+      - SPRING_PROFILES_ACTIVE=prod
+    networks:
+      - rinha-network
+      - payment-processor
+    deploy:
+      resources:
+        limits:
+          cpus: "0.4"
+          memory: "70M"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
   nginx:
     image: nginx:alpine
-    container_name: nginx
-    restart: unless-stopped
     ports:
       - "9999:9999"
     volumes:
@@ -128,9 +129,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.2" # <-- CPU ajustada
-          # ✅ Limite explícito para o Nginx
-          memory: "25M"
+          cpus: "0.1"
+          memory: "10M"
 
 volumes:
   mongo_data:
@@ -138,7 +138,6 @@ volumes:
 networks:
   rinha-network:
     driver: bridge
-  # Adicione esta linha para conectar com os processadores:
   payment-processor:
     external: true
     name: payment-processor

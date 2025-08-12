@@ -1,68 +1,76 @@
-package com.estagiario.gobots.rinha_backend.application.worker.impl
+package com.estagiario.gobots.rinha_backend.application.worker
 
 import com.estagiario.gobots.rinha_backend.application.client.ProcessorClient
-import com.estagiario.gobots.rinha_backend.application.worker.HealthCheckWorker
-import com.estagiario.gobots.rinha_backend.infrastructure.client.dto.ProcessorHealthResponse
-import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.launch
-import mu.KotlinLogging
-import org.springframework.data.redis.core.ReactiveStringRedisTemplate
+import com.estagiario.gobots.rinha_backend.domain.HealthCheckState
+import org.springframework.beans.factory.annotation.Value
+import org.springframework.data.mongodb.core.ReactiveMongoTemplate
+import org.springframework.data.mongodb.core.FindAndModifyOptions
+import org.springframework.data.mongodb.core.query.Criteria
+import org.springframework.data.mongodb.core.query.Query
+import org.springframework.data.mongodb.core.query.Update
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Component
+import reactor.core.publisher.Mono
 import java.time.Duration
+import java.time.Instant
+import java.util.concurrent.atomic.AtomicReference
 
 @Component
 class HealthCheckWorkerImpl(
     private val processorClient: ProcessorClient,
-    private val redisTemplate: ReactiveStringRedisTemplate
-    // Adicionar aqui as configurações do application.yml via @Value se necessário
-) : HealthCheckWorker {
+    private val mongoTemplate: ReactiveMongoTemplate,
+    @Value("\${app.instance-id:API-LOCAL}") private val instanceId: String,
+    @Value("\${app.health-check.leader-ttl-seconds:10}") private val leaderTtlSeconds: Long
+) {
 
-    private val logger = KotlinLogging.logger {}
-    private val instanceId = "API_INSTANCE_${java.util.UUID.randomUUID()}" // ID único para esta instância
-    private val leaderKey = "rinha:leader:health-checker"
-
-    @Scheduled(fixedDelay = 5000) // Executa a cada 5 segundos
-    override suspend fun monitorProcessorsHealth() {
-        if (tryToBecomeLeader()) {
-            logger.info { "Instância $instanceId é o líder. Executando health check..." }
-            try {
-                coroutineScope {
-                    launch { checkProcessorHealth("default", processorClient::checkDefaultProcessorHealth) }
-                    launch { checkProcessorHealth("fallback", processorClient::checkFallbackProcessorHealth) }
-                }
-            } finally {
-                // Embora o TTL do Redis lide com isso, é uma boa prática liberar o lock
-                // redisTemplate.delete(leaderKey).subscribe()
-            }
-        } else {
-            logger.debug { "Instância $instanceId não é o líder. Pulando health check." }
-        }
+    companion object {
+        val defaultProcessorState = AtomicReference(HealthCheckState.HEALTHY)
+        val fallbackProcessorState = AtomicReference(HealthCheckState.HEALTHY)
     }
 
-    private suspend fun tryToBecomeLeader(): Boolean {
-        // Tenta adquirir um lock no Redis com um TTL (Time-To-Live).
-        // A opção "setIfAbsent" garante que apenas uma instância consiga o lock.
-        return redisTemplate.opsForValue()
-            .setIfAbsent(leaderKey, instanceId, Duration.ofSeconds(10))
-            .block() ?: false
+    @Scheduled(fixedDelayString = "\${app.health-check.delay-ms:5000}")
+    fun scheduleHealthCheck() {
+        tryToBecomeLeader()
+            .filter { it }
+            .flatMap { monitorProcessorsHealth() }
+            .onErrorResume { Mono.empty() }
+            .subscribe()
     }
 
-    private suspend fun checkProcessorHealth(
-        processorName: String,
-        healthCheckCall: suspend () -> ProcessorHealthResponse
-    ) {
-        val healthKey = "processor:$processorName:health"
-        try {
-            val health = healthCheckCall()
-            // Salva o estado de saúde como um JSON simples no Redis com um TTL
-            val healthJson = """{"failing":${health.failing},"minResponseTime":${health.minResponseTime}}"""
-            redisTemplate.opsForValue().set(healthKey, healthJson, Duration.ofSeconds(15)).subscribe()
-            logger.debug { "Saúde do processador $processorName atualizada: $healthJson" }
-        } catch (e: Exception) {
-            logger.warn(e) { "Falha ao verificar saúde do processador $processorName. Marcando como indisponível." }
-            val healthJson = """{"failing":true,"minResponseTime":-1}"""
-            redisTemplate.opsForValue().set(healthKey, healthJson, Duration.ofSeconds(15)).subscribe()
-        }
+    private fun monitorProcessorsHealth(): Mono<Void> {
+        val checkDefault = processorClient.checkDefaultProcessorHealth()
+            .map { HealthCheckState.HEALTHY }
+            .onErrorResume { Mono.just(HealthCheckState.UNHEALTHY) }
+            .doOnSuccess { defaultProcessorState.set(it) }
+
+        val checkFallback = processorClient.checkFallbackProcessorHealth()
+            .map { HealthCheckState.HEALTHY }
+            .onErrorResume { Mono.just(HealthCheckState.UNHEALTHY) }
+            .doOnSuccess { fallbackProcessorState.set(it) }
+
+        return Mono.zip(checkDefault, checkFallback).then()
+    }
+
+    private fun tryToBecomeLeader(): Mono<Boolean> {
+        val now = Instant.now()
+        val expireAt = now.plusSeconds(leaderTtlSeconds)
+
+        val query = Query.query(
+            Criteria.where("_id").`is`("health-check") // key document id
+                .orOperator(
+                    Criteria.where("expireAt").lt(now),
+                    Criteria.where("owner").`is`(instanceId)
+                )
+        )
+
+        val update = Update()
+            .set("owner", instanceId)
+            .set("expireAt", expireAt)
+
+        val options = FindAndModifyOptions.options().returnNew(true).upsert(true)
+
+        return mongoTemplate.findAndModify(query, update, options, LeaderLock::class.java)
+            .map { it.owner == instanceId }
+            .onErrorReturn(false)
     }
 }

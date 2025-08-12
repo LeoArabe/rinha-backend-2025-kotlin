@@ -19,16 +19,13 @@ repositories {
     mavenCentral()
 }
 
-// O bloco sourceSets foi removido para evitar o erro de duplicata.
-// O plugin do GraalVM encontrará os recursos em src/main/resources/META-INF/native-image/ por convenção.
-
 dependencies {
     // Spring Boot Reactive Stack
     implementation("org.springframework.boot:spring-boot-starter-webflux")
     implementation("org.springframework.boot:spring-boot-starter-data-mongodb-reactive")
-    implementation("org.springframework.boot:spring-boot-starter-data-redis-reactive")
     implementation("org.springframework.boot:spring-boot-starter-actuator")
     implementation("org.springframework.boot:spring-boot-starter-validation")
+    implementation("org.springframework.boot:spring-boot-autoconfigure")
 
     // Kotlin Core & Coroutines
     implementation("org.jetbrains.kotlin:kotlin-reflect")

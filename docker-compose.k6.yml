@@ -1,0 +1,33 @@
+version: '3.8'
+
+services:
+  api01:
+    environment:
+      - SPRING_PROFILES_ACTIVE=k6
+      - LOG_LEVEL_APP=WARN
+      - LOG_LEVEL_ROOT=WARN
+      - APP_FAIL_ON_PERSIST_ERROR=true  # opcional: ajuda k6 a detectar falhas de persistência
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: "180M"
+
+  api02:
+    environment:
+      - SPRING_PROFILES_ACTIVE=k6
+      - LOG_LEVEL_APP=WARN
+      - LOG_LEVEL_ROOT=WARN
+      - APP_FAIL_ON_PERSIST_ERROR=true
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: "180M"
+
+  mongo:
+    deploy:
+      resources:
+        limits:
+          cpus: "0.9"
+          memory: "450M"

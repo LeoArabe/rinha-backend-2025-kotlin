@@ -2,28 +2,24 @@
 FROM ghcr.io/graalvm/graalvm-community:21 AS builder
 RUN microdnf install -y findutils
 WORKDIR /app
-
-# Cache de dependências
 COPY gradle gradle
 COPY gradlew .
 COPY gradle.properties .
 COPY settings.gradle.kts .
 COPY build.gradle.kts .
 RUN ./gradlew dependencies --no-daemon
-
-# Código fonte
 COPY src src
-
-# Build executável nativo
 RUN ./gradlew nativeCompile --no-daemon \
     && strip build/native/nativeCompile/rinha-backend-app
 
-# Stage runtime: debian-slim com curl (permite healthchecks com curl)
-FROM debian:stable-slim AS runtime
-RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates && rm -rf /var/lib/apt/lists/*
-RUN useradd --user-group --create-home --shell /bin/false nonroot
-USER nonroot:nonroot
+# Stage runtime debug: debian-slim com bash & curl
+FROM debian:stable-slim AS debug
+RUN apt-get update && apt-get install -y --no-install-recommends bash curl ca-certificates procps && rm -rf /var/lib/apt/lists/*
+RUN useradd --user-group --create-home --shell /bin/bash devuser
+USER devuser:devuser
 WORKDIR /app
 COPY --from=builder /app/build/native/nativeCompile/rinha-backend-app .
+COPY start-app.sh /app/start-app.sh
+RUN chmod +x /app/start-app.sh
 EXPOSE 8080
-ENTRYPOINT ["/app/rinha-backend-app"]
+ENTRYPOINT ["/bin/bash", "/app/start-app.sh"]
