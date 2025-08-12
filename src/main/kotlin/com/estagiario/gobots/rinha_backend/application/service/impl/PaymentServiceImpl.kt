@@ -23,11 +23,15 @@ class PaymentServiceImpl(
 ) : PaymentService {
 
     override fun processNewPayment(request: PaymentRequest): Mono<Void> {
+        // validação básica (uuid etc) deve ocorrer no controller; assumimos request já validado
         val payment = request.toDomainEntity()
         val event = PaymentEvent.newProcessPaymentEvent(payment.correlationId)
 
-        return paymentRepository.save(payment)
-            .flatMap { paymentEventRepository.save(event) }
+        // Persistir em paralelo para reduzir latency wall-clock
+        return Mono.zip(
+            paymentRepository.save(payment),
+            paymentEventRepository.save(event)
+        )
             .doOnSuccess {
                 logger.info { "message=\"Intenção de pagamento persistida\" correlationId=${request.correlationId}" }
             }

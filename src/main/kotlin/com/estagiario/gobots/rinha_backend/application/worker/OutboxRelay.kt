@@ -3,12 +3,12 @@ package com.estagiario.gobots.rinha_backend.application.worker
 import com.estagiario.gobots.rinha_backend.domain.Payment
 import com.estagiario.gobots.rinha_backend.domain.PaymentEvent
 import com.estagiario.gobots.rinha_backend.domain.PaymentEventStatus
+import com.estagiario.gobots.rinha_backend.application.worker.PaymentProcessorWorker
 import com.estagiario.gobots.rinha_backend.infrastructure.outgoing.repository.PaymentEventRepository
 import com.estagiario.gobots.rinha_backend.infrastructure.outgoing.repository.PaymentRepository
 import mu.KotlinLogging
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.data.domain.Sort
-import org.springframework.data.mongodb.core.FindAndModifyOptions
 import org.springframework.data.mongodb.core.ReactiveMongoTemplate
 import org.springframework.data.mongodb.core.query.Criteria
 import org.springframework.data.mongodb.core.query.Query
@@ -31,8 +31,9 @@ class OutboxRelay(
     @Value("\${app.instance-id:API-LOCAL}") private val instanceId: String,
     @Value("\${app.run-mode:api}") private val runMode: String,
     @Value("\${app.outbox.batch-size:10}") private val batchSize: Int,
-    @Value("\${app.outbox.max-concurrency:4}") private val maxConcurrency: Int,
-    @Value("\${app.outbox.lock-timeout-minutes:5}") private val lockTimeoutMinutes: Long
+    @Value("\${app.outbox.max-concurrency:3}") private val maxConcurrency: Int,
+    @Value("\${app.outbox.lock-timeout-minutes:5}") private val lockTimeoutMinutes: Long,
+    @Value("\${app.outbox.processing-delay-ms:500}") private val processingDelayMs: Long
 ) {
 
     @Scheduled(fixedDelayString = "\${app.outbox.processing-delay-ms:500}")
@@ -45,62 +46,16 @@ class OutboxRelay(
             .subscribe()
     }
 
+    /**
+     * Claim em lote + processamento concorrente limitado.
+     * Busca candidatos (limit = batchSize), tenta marcar em lote via updateMulti,
+     * re-busca apenas os eventos que esta instância claimou e processa com flatMap(maxConcurrency).
+     */
     private fun claimAndProcessBatch(): Mono<Void> {
-        return Flux.range(1, batchSize)
-            .concatMap { claimOneEvent() }
-            .takeWhile { it != null }
-            .cast(PaymentEvent::class.java)
-            .collectList()
-            .flatMap { claimedEvents ->
-                if (claimedEvents.isEmpty()) {
-                    return@flatMap Mono.empty<Void>()
-                }
-                logger.debug { "Claimed ${claimedEvents.size} events for processing" }
-                val correlationIds = claimedEvents.map { it.correlationId }.distinct()
-                paymentRepository.findAllByCorrelationIdIn(correlationIds)
-                    .collectMap { it.correlationId }
-                    .flatMap { paymentsMap ->
-                        Flux.fromIterable(claimedEvents)
-                            .flatMap(
-                                { event -> processEvent(event, paymentsMap) },
-                                maxConcurrency
-                            )
-                            .then()
-                    }
-            }
-    }
-
-    private fun processEvent(event: PaymentEvent, paymentsMap: Map<String, Payment>): Mono<Void> {
-        val payment = paymentsMap[event.correlationId]
-        return if (payment == null) {
-            logger.warn { "Payment not found for event with correlationId=${event.correlationId}. Marking event as processed to avoid retry loops." }
-            paymentEventRepository.save(
-                event.copy(
-                    status = PaymentEventStatus.PROCESSED,
-                    processedAt = Instant.now()
-                )
-            ).then()
-        } else {
-            if (event.status != PaymentEventStatus.PROCESSING || event.owner != instanceId) {
-                logger.warn {
-                    "Event ${event.id} for correlationId=${event.correlationId} is not properly claimed by this instance. " +
-                            "Status=${event.status}, Owner=${event.owner}, Expected=${instanceId}. Skipping."
-                }
-                return Mono.empty()
-            }
-            paymentProcessorWorker.processPaymentFromQueue(event, payment)
-                .onErrorResume { error ->
-                    logger.error(error) { "Unhandled error processing event for correlationId=${event.correlationId}. Releasing lock." }
-                    releaseEventLock(event)
-                }
-        }
-    }
-
-    private fun claimOneEvent(): Mono<PaymentEvent?> {
         val now = Instant.now()
         val lockExpiredThreshold = now.minus(lockTimeoutMinutes, ChronoUnit.MINUTES)
 
-        val query = Query()
+        val listQuery = Query()
             .addCriteria(
                 Criteria.where("status").`is`(PaymentEventStatus.PENDING)
                     .andOperator(
@@ -116,36 +71,76 @@ class OutboxRelay(
                     )
             )
             .with(Sort.by(Sort.Direction.ASC, "createdAt"))
-            .limit(1)
+            .limit(batchSize)
 
-        val update = Update()
-            .set("status", PaymentEventStatus.PROCESSING)
-            .set("owner", instanceId)
-            .set("processingAt", now)
+        return mongoTemplate.find(listQuery, PaymentEvent::class.java)
+            .collectList()
+            .flatMap { candidates ->
+                if (candidates.isEmpty()) return@flatMap Mono.empty<Void>()
 
-        val options = FindAndModifyOptions.options().returnNew(true)
+                val ids = candidates.mapNotNull { it.id }
+                if (ids.isEmpty()) return@flatMap Mono.empty<Void>()
 
-        return mongoTemplate.findAndModify(query, update, options, PaymentEvent::class.java)
-            .doOnNext { event ->
-                logger.debug { "Successfully claimed event ${event.id} for correlationId=${event.correlationId}" }
+                val claimQuery = Query.query(Criteria.where("_id").`in`(ids).and("status").`is`(PaymentEventStatus.PENDING))
+                val claimUpdate = Update()
+                    .set("status", PaymentEventStatus.PROCESSING)
+                    .set("owner", instanceId)
+                    .set("processingAt", now)
+
+                mongoTemplate.updateMulti(claimQuery, claimUpdate, PaymentEvent::class.java)
+                    .flatMap { updateResult ->
+                        if (updateResult.modifiedCount == 0L) {
+                            return@flatMap Mono.empty<Void>()
+                        }
+
+                        val reFetch = Query.query(
+                            Criteria.where("_id").`in`(ids)
+                                .and("owner").`is`(instanceId)
+                                .and("status").`is`(PaymentEventStatus.PROCESSING)
+                        )
+
+                        mongoTemplate.find(reFetch, PaymentEvent::class.java).collectList()
+                            .flatMap { claimedEvents ->
+                                if (claimedEvents.isEmpty()) return@flatMap Mono.empty<Void>()
+
+                                val correlationIds = claimedEvents.map { it.correlationId }.distinct()
+
+                                paymentRepository.findAllByCorrelationIdIn(correlationIds)
+                                    .collectMap({ it.correlationId }, { it })
+                                    .flatMap { paymentsMap ->
+                                        Flux.fromIterable(claimedEvents)
+                                            .flatMap({ event ->
+                                                val payment = paymentsMap[event.correlationId]
+                                                if (payment == null) {
+                                                    // marca event processed para evitar retry infinito
+                                                    paymentEventRepository.save(
+                                                        event.copy(
+                                                            status = PaymentEventStatus.PROCESSED,
+                                                            processedAt = Instant.now()
+                                                        )
+                                                    ).then()
+                                                } else {
+                                                    paymentProcessorWorker.processPaymentFromQueue(event, payment)
+                                                        .onErrorResume { err ->
+                                                            logger.error(err) { "Unhandled error processing event for correlationId=${event.correlationId}. Releasing lock." }
+                                                            // liberta lock para retry posterior
+                                                            paymentEventRepository.save(
+                                                                event.copy(
+                                                                    status = PaymentEventStatus.PENDING,
+                                                                    owner = null,
+                                                                    processingAt = null
+                                                                )
+                                                            ).then()
+                                                        }
+                                                }
+                                            }, maxConcurrency)
+                                            .then()
+                                    }
+                            }
+                    }
             }
-            .onErrorResume { error ->
-                logger.debug { "Failed to claim event (normal in concurrent environment): ${error.message}" }
-                Mono.empty()
-            }
+            .doOnError { e -> logger.error(e) { "Erro durante claimAndProcessBatch" } }
+            .onErrorResume { Mono.empty() }
     }
 
-    private fun releaseEventLock(event: PaymentEvent): Mono<Void> {
-        return paymentEventRepository.save(
-            event.copy(
-                status = PaymentEventStatus.PENDING,
-                owner = null,
-                processingAt = null
-            )
-        )
-            .doOnSuccess {
-                logger.debug { "Released lock for event ${event.id} correlationId=${event.correlationId}" }
-            }
-            .then()
-    }
 }

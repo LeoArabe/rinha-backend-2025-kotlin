@@ -1,3 +1,6 @@
+# ===================================================================
+# Default Application Configuration
+# ===================================================================
 server:
   port: ${SERVER_PORT:8080}
   netty:
@@ -6,7 +9,7 @@ server:
 
 app:
   instance-id: ${INSTANCE_ID:API-LOCAL}
-  run-mode: ${APP_RUN_MODE:api}
+  run-mode: ${APP_RUN_MODE:api} # Can be 'api', 'worker', or 'hybrid'
   fail-on-persist-error: ${APP_FAIL_ON_PERSIST_ERROR:false}
 
   outbox:
@@ -71,3 +74,44 @@ logging:
     root: ${LOG_LEVEL_ROOT:WARN}
   pattern:
     console: "%d{HH:mm:ss.SSS} [%thread] %-5level %logger - %msg%n"
+
+# ===================================================================
+# Profile-specific Configurations
+# ===================================================================
+---
+# Profile for K6 load testing and production environment
+spring:
+  config:
+    activate:
+      on-profile: "k6"
+  data:
+    mongodb:
+      uri: ${MONGODB_URI:mongodb://mongo:27017/rinhaDB?replicaSet=rs0&w=majority}
+  profiles:
+    group:
+      "worker": "k6,no-web" # The 'worker' profile activates 'k6' and 'no-web'
+
+# Outbox tuning for high performance
+app:
+  outbox:
+    batch-size: 10
+    max-concurrency: 3
+    processing-delay-ms: 50
+    lock-timeout-minutes: 2
+
+# Retry tuning for faster failure/recovery during tests
+payment:
+  retry:
+    max-attempts: 2
+    max-backoff-seconds: 30
+  circuit-breaker:
+    request-timeout-seconds: 4
+
+---
+# Profile to disable the web server (for worker-only instances)
+spring:
+  config:
+    activate:
+      on-profile: "no-web"
+  main:
+    web-application-type: none

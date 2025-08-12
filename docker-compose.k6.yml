@@ -1,21 +1,13 @@
 version: '3.8'
 
+# This file overrides resource limits for local k6 testing.
+# It provides more resources than the final submission to find performance ceilings.
+
 services:
   api01:
     environment:
       - SPRING_PROFILES_ACTIVE=k6
-      - LOG_LEVEL_APP=WARN
-      - LOG_LEVEL_ROOT=WARN
-      - APP_FAIL_ON_PERSIST_ERROR=true  # opcional: ajuda k6 a detectar falhas de persistência
-    deploy:
-      resources:
-        limits:
-          cpus: "1.0"
-          memory: "180M"
-
-  api02:
-    environment:
-      - SPRING_PROFILES_ACTIVE=k6
+      - APP_RUN_MODE=api # ✅ Runs as API only
       - LOG_LEVEL_APP=WARN
       - LOG_LEVEL_ROOT=WARN
       - APP_FAIL_ON_PERSIST_ERROR=true
@@ -25,9 +17,34 @@ services:
           cpus: "1.0"
           memory: "180M"
 
+  api02:
+    environment:
+      - SPRING_PROFILES_ACTIVE=k6
+      - APP_RUN_MODE=api # ✅ Runs as API only
+      - LOG_LEVEL_APP=WARN
+      - LOG_LEVEL_ROOT=WARN
+      - APP_FAIL_ON_PERSIST_ERROR=true
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: "180M"
+
+  worker01: # ✅ Worker added for local testing
+    environment:
+      - SPRING_PROFILES_ACTIVE=worker # ✅ Activates k6 + no-web profiles
+      - APP_RUN_MODE=worker # ✅ Runs as Worker only
+      - LOG_LEVEL_APP=WARN
+      - LOG_LEVEL_ROOT=WARN
+    deploy:
+      resources:
+        limits:
+          cpus: "1.2" # More CPU for heavy lifting
+          memory: "200M"
+
   mongo:
     deploy:
       resources:
         limits:
-          cpus: "0.9"
+          cpus: "1.0" # Generous CPU for Mongo during tests
           memory: "450M"

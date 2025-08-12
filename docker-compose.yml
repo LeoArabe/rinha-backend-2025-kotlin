@@ -1,3 +1,5 @@
+version: '3.8'
+
 services:
   mongo:
     image: mongo:7.0
@@ -27,12 +29,11 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.6"
-          memory: "260M"
+          cpus: "0.6" # ✅ 0.6 CPU para o Mongo
+          memory: "260M" # ✅ 260MB para o Mongo
 
   mongo-setup:
     image: mongo:7.0
-    # Não nomeamos container para evitar conflitos em reruns
     depends_on:
       mongo:
         condition: service_healthy
@@ -42,9 +43,6 @@ services:
       - rinha-network
     environment:
       - MONGO_HOST=mongo
-      - MONGO_PORT=27017
-      - DB_NAME=rinhaDB
-      - SKIP_DROP=false
     entrypoint: ["bash", "/setup-mongo.sh"]
     restart: "no"
 
@@ -61,7 +59,7 @@ services:
       - PROCESSOR_DEFAULT_URL=http://payment-processor-default:8080
       - PROCESSOR_FALLBACK_URL=http://payment-processor-fallback:8080
       - INSTANCE_ID=API-1
-      - APP_RUN_MODE=hybrid
+      - APP_RUN_MODE=api # ✅ Roda somente como API
       - SERVER_PORT=8080
       - SPRING_PROFILES_ACTIVE=prod
     networks:
@@ -70,10 +68,9 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.4"
-          memory: "70M"
+          cpus: "0.35" # ✅ Balanceado para API
+          memory: "110M" # ✅ Balanceado para API
     healthcheck:
-      # roda INSIDE do container (por isso o runtime contém curl)
       test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
       interval: 10s
       timeout: 3s
@@ -93,7 +90,7 @@ services:
       - PROCESSOR_DEFAULT_URL=http://payment-processor-default:8080
       - PROCESSOR_FALLBACK_URL=http://payment-processor-fallback:8080
       - INSTANCE_ID=API-2
-      - APP_RUN_MODE=api
+      - APP_RUN_MODE=api # ✅ Roda somente como API
       - SERVER_PORT=8080
       - SPRING_PROFILES_ACTIVE=prod
     networks:
@@ -102,14 +99,38 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.4"
-          memory: "70M"
+          cpus: "0.35" # ✅ Balanceado para API
+          memory: "110M" # ✅ Balanceado para API
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
       interval: 10s
       timeout: 3s
       retries: 3
       start_period: 45s
+
+  worker01: # ✅ Worker dedicado
+    build:
+      context: .
+      dockerfile: Dockerfile
+    hostname: worker01
+    depends_on:
+      mongo-setup:
+        condition: service_completed_successfully
+    environment:
+      - MONGODB_URI=mongodb://mongo:27017/rinhaDB?replicaSet=rs0&retryWrites=true&w=majority
+      - PROCESSOR_DEFAULT_URL=http://payment-processor-default:8080
+      - PROCESSOR_FALLBACK_URL=http://payment-processor-fallback:8080
+      - INSTANCE_ID=WORKER-1
+      - APP_RUN_MODE=worker # ✅ Roda somente como Worker
+      - SPRING_PROFILES_ACTIVE=worker # ✅ Ativa o perfil que desliga a web
+    networks:
+      - rinha-network
+      - payment-processor
+    deploy:
+      resources:
+        limits:
+          cpus: "0.6" # ✅ Mais CPU para o trabalho pesado
+          memory: "120M" # ✅ Mais memória para o processamento em lote
 
   nginx:
     image: nginx:alpine
@@ -124,12 +145,11 @@ services:
         condition: service_healthy
     networks:
       - rinha-network
-      - payment-processor
     deploy:
       resources:
         limits:
-          cpus: "0.1"
-          memory: "10M"
+          cpus: "0.1" # ✅ CPU mínima para o Nginx
+          memory: "20M" # ✅ Memória mínima para o Nginx
 
 volumes:
   mongo_data:

@@ -8,8 +8,6 @@ import org.springframework.data.domain.Sort
 import org.springframework.data.mongodb.core.ReactiveMongoTemplate
 import org.springframework.data.mongodb.core.index.CompoundIndexDefinition
 import org.springframework.data.mongodb.core.index.Index
-import org.springframework.data.mongodb.core.index.ReactiveIndexOperations
-import org.springframework.data.mongodb.core.query.Criteria
 import reactor.core.publisher.Flux
 
 private val logger = KotlinLogging.logger {}
@@ -35,12 +33,12 @@ class MongoConfig {
     }
 
     private fun createPaymentIndexes(mongoTemplate: ReactiveMongoTemplate): Flux<String> {
-        val paymentIndexOps: ReactiveIndexOperations = mongoTemplate.indexOps("payments")
+        val paymentIndexOps = mongoTemplate.indexOps("payments")
 
         val correlationIdIndex = Index()
             .on("correlationId", Sort.Direction.ASC)
             .unique()
-            .named("correlation_idx") // ✅ Correct
+            .named("correlation_idx")
 
         val summaryIndex = CompoundIndexDefinition(
             org.bson.Document(mapOf(
@@ -48,11 +46,7 @@ class MongoConfig {
                 "lastUpdatedAt" to 1,
                 "processorUsed" to 1
             ))
-        ).named("summary_idx") // ✅ Correct
-
-        // NOTE: The retry_idx from the script is not used in the application's queries.
-        // It's safe to let the script handle it or remove it from the script if unused.
-        // For consistency, we are removing it from the application code.
+        ).named("summary_idx")
 
         return Flux.concat(
             paymentIndexOps.ensureIndex(correlationIdIndex),
@@ -61,55 +55,46 @@ class MongoConfig {
     }
 
     private fun createPaymentEventIndexes(mongoTemplate: ReactiveMongoTemplate): Flux<String> {
-        // ✅ CORREÇÃO: Alinhar o nome da coleção com o script setup-mongo.sh
-        val eventIndexOps: ReactiveIndexOperations = mongoTemplate.indexOps("payment_outbox")
+        // Garante índices em ambas as coleções possíveis (compatibilidade)
+        val eventCollections = listOf("payment_events", "payment_outbox")
 
-        val outboxProcessingIndex = CompoundIndexDefinition(
-            org.bson.Document(mapOf(
-                "status" to 1,
-                "createdAt" to 1
-            ))
-        ).named("status_created_at_idx") // ✅ CORREÇÃO: Alinhar o nome do índice com o script
+        return Flux.fromIterable(eventCollections)
+            .flatMap { col ->
+                val eventIndexOps = mongoTemplate.indexOps(col)
+                val outboxProcessingIndex = CompoundIndexDefinition(
+                    org.bson.Document(mapOf(
+                        "status" to 1,
+                        "createdAt" to 1
+                    ))
+                ).named("status_created_at_idx")
 
-        val correlationIndex = Index()
-            .on("correlationId", Sort.Direction.ASC)
-            .named("event_correlation_idx")
+                val correlationIndex = Index()
+                    .on("correlationId", Sort.Direction.ASC)
+                    .named("event_correlation_idx")
 
-        val cleanupIndex = CompoundIndexDefinition(
-            org.bson.Document(mapOf(
-                "status" to 1,
-                "processedAt" to 1
-            ))
-        ).named("event_cleanup_idx")
+                val cleanupIndex = CompoundIndexDefinition(
+                    org.bson.Document(mapOf(
+                        "status" to 1,
+                        "processedAt" to 1
+                    ))
+                ).named("event_cleanup_idx")
 
-        val ttlIndex = Index()
-            .on("processedAt", Sort.Direction.ASC)
-            .expire(java.time.Duration.ofDays(30))
-            .named("processed_events_ttl_idx")
-            .partial(
-                org.springframework.data.mongodb.core.index.PartialIndexFilter.of(
-                    Criteria.where("status").`is`("PROCESSED")
-                )
-            )
-
-        return Flux.concat(
-            eventIndexOps.ensureIndex(outboxProcessingIndex),
-            eventIndexOps.ensureIndex(correlationIndex),
-            eventIndexOps.ensureIndex(cleanupIndex),
-            eventIndexOps.ensureIndex(ttlIndex)
-            // ✅ CORREÇÃO: Atualizar o log para refletir o nome correto da coleção
-        ).doOnNext { logger.info { "Index ensured on 'payment_outbox': $it" } }
+                Flux.concat(
+                    eventIndexOps.ensureIndex(outboxProcessingIndex),
+                    eventIndexOps.ensureIndex(correlationIndex),
+                    eventIndexOps.ensureIndex(cleanupIndex)
+                ).doOnNext { logger.info { "Index ensured on '$col': $it" } }
+            }
     }
 
     private fun createLeaderLockIndexes(mongoTemplate: ReactiveMongoTemplate): Flux<String> {
-        val lockIndexOps: ReactiveIndexOperations = mongoTemplate.indexOps("leader_locks")
+        val lockIndexOps = mongoTemplate.indexOps("leader_locks")
 
         val lockTtlIndex = Index()
             .on("expireAt", Sort.Direction.ASC)
-            .expire(java.time.Duration.ZERO) // The script uses expireAfterSeconds: 0
-            .named("ttl_idx") // ✅ Correct
+            .expire(java.time.Duration.ZERO)
+            .named("ttl_idx")
 
-        // The leader_election_idx is application-specific and doesn't conflict
         val leaderElectionIndex = CompoundIndexDefinition(
             org.bson.Document(mapOf(
                 "_id" to 1,

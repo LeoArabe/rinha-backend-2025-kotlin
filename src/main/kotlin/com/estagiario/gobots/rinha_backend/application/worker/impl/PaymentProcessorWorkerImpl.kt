@@ -17,7 +17,6 @@ import org.springframework.web.reactive.function.client.WebClientResponseExcepti
 import reactor.core.publisher.Mono
 import java.time.Duration
 import java.time.Instant
-import java.util.concurrent.TimeoutException
 import kotlin.math.pow
 
 private val logger = KotlinLogging.logger {}
@@ -28,16 +27,14 @@ class PaymentProcessorWorkerImpl(
     private val paymentRepository: PaymentRepository,
     private val paymentEventRepository: PaymentEventRepository,
     @Value("\${payment.circuit-breaker.request-timeout-seconds:4}") private val requestTimeoutSeconds: Long,
-    @Value("\${payment.retry.max-attempts:3}") private val maxAttempts: Int,
-    @Value("\${payment.retry.max-backoff-seconds:300}") private val maxBackoffSeconds: Long
+    @Value("\${payment.retry.max-attempts:2}") private val maxAttempts: Int,
+    @Value("\${payment.retry.max-backoff-seconds:30}") private val maxBackoffSeconds: Long
 ) : PaymentProcessorWorker {
 
     override fun processPaymentFromQueue(event: PaymentEvent, payment: Payment): Mono<Void> {
-        // ✅ VALIDAÇÃO ADICIONAL: Verificar se o evento está realmente sendo processado por esta instância
         if (event.status != PaymentEventStatus.PROCESSING) {
             logger.warn {
-                "Event ${event.id} for correlationId=${payment.correlationId} is not in PROCESSING state. " +
-                        "Current status: ${event.status}. Skipping processing."
+                "Event ${event.id} for correlationId=${payment.correlationId} is not in PROCESSING state. Current status: ${event.status}. Skipping."
             }
             return Mono.empty()
         }
@@ -114,7 +111,6 @@ class PaymentProcessorWorkerImpl(
         val nextStatus = if (isRetryable) PaymentStatus.AGENDADO_RETRY else PaymentStatus.FALHA
 
         val nextRetryAt = if (nextStatus == PaymentStatus.AGENDADO_RETRY) {
-            // ✅ MELHORIA: Limitar o backoff máximo para evitar esperas muito longas
             val backoffSeconds = minOf(
                 2.0.pow(payment.attemptCount.toDouble()).toLong(),
                 maxBackoffSeconds
@@ -128,17 +124,10 @@ class PaymentProcessorWorkerImpl(
             status = nextStatus,
             lastErrorMessage = exception.message,
             lastUpdatedAt = Instant.now(),
-            nextRetryAt = nextRetryAt
+            nextRetryAt = nextRetryAt,
+            attemptCount = payment.attemptCount + 1
         )
 
-        logger.warn {
-            "Payment processing failed for correlationId=${payment.correlationId}. " +
-                    "Processor=$failedProcessor, NewStatus=${updatedPayment.status}, " +
-                    "Attempt=${payment.attemptCount}/$maxAttempts, " +
-                    "NextRetryAt=${updatedPayment.nextRetryAt}, Error=${exception.message}"
-        }
-
-        // ✅ CORREÇÃO CRÍTICA: Corrigir inconsistência de tipos no Mono
         val updatedEventMono: Mono<Void> = if (isRetryable) {
             paymentEventRepository.save(
                 event.copy(
@@ -147,9 +136,8 @@ class PaymentProcessorWorkerImpl(
                     processingAt = null,
                     nextRetryAt = nextRetryAt
                 )
-            ).then()  // ✅ Garantir que retorne Mono<Void>
+            ).then()
         } else {
-            // ✅ CORREÇÃO: Remover .then(Mono.empty()) desnecessário
             markEventAsProcessed(event)
         }
 
