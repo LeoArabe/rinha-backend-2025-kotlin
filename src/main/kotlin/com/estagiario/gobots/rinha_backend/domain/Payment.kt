@@ -7,12 +7,8 @@ import java.time.Instant
 
 @Document("payments")
 data class Payment(
-    @Id
-    val id: String? = null,
-
-    @Indexed(unique = true)
-    val correlationId: String,
-
+    @Id val id: String? = null,
+    @Indexed(unique = true) val correlationId: String,
     val amount: Long,
     val status: PaymentStatus,
     val requestedAt: Instant,
@@ -33,9 +29,20 @@ data class Payment(
                 lastUpdatedAt = now
             )
         }
+
+        // ✅ GARANTA QUE ESTE MÉTODO ESTÁ AQUI DENTRO
+        fun newPending(correlationId: String, amountCents: Long): Payment {
+            val now = Instant.now()
+            return Payment(
+                correlationId = correlationId,
+                amount = amountCents,
+                status = PaymentStatus.PROCESSANDO,
+                requestedAt = now,
+                lastUpdatedAt = now
+            )
+        }
     }
 
-    // ✅ PROPRIEDADE COMPUTED para compatibilidade com o controller
     val createdAt: Instant get() = requestedAt
 
     fun toBigDecimal(): java.math.BigDecimal {
