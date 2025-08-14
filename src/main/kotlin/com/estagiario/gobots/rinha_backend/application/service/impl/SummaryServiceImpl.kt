@@ -26,14 +26,12 @@ class SummaryServiceOptimized(
 ) : SummaryService {
 
     override fun compute(from: Instant?, to: Instant?): Mono<PaymentsSummary> {
-        // ⚡ Validação de entrada
         if (from != null && to != null && from.isAfter(to)) {
             return Mono.error(InvalidDateRangeException("Data 'from' deve ser anterior a 'to'"))
         }
 
         val criteria = buildCriteria(from, to)
 
-        // ⚡ Pipeline MongoDB otimizada
         val pipeline = newAggregation(
             match(criteria),
             group("processorUsed")
@@ -43,43 +41,30 @@ class SummaryServiceOptimized(
 
         return mongo.aggregate(pipeline, "payments", Document::class.java)
             .collectMap(
-                { doc -> (doc.getString("_id") ?: "unknown").lowercase() },
-                { doc ->
-                    val requests = (doc.get("totalRequests") as Number?)?.toLong() ?: 0L
-                    val amountCents = (doc.get("totalAmountCents") as Number?)?.toLong() ?: 0L
-                    SummaryPart(
-                        totalRequests = requests,
-                        totalAmount = BigDecimal.valueOf(amountCents, 2) // ⚡ Direct conversion
-                    )
+                { d -> (d.getString("_id") ?: "unknown").lowercase() },
+                { d ->
+                    val req = (d.get("totalRequests") as Number?)?.toLong() ?: 0L
+                    val cents = (d.get("totalAmountCents") as Number?)?.toLong() ?: 0L
+                    SummaryPart(req, BigDecimal.valueOf(cents, 2))
                 }
             )
-            .map { resultsMap ->
+            .map { m ->
                 PaymentsSummary(
-                    default = resultsMap["default"] ?: SummaryPart.empty(),
-                    fallback = resultsMap["fallback"] ?: SummaryPart.empty()
+                    default = m["default"] ?: SummaryPart.empty(),
+                    fallback = m["fallback"] ?: SummaryPart.empty()
                 )
             }
             .timeout(Duration.ofSeconds(timeoutSeconds))
-            .doOnError { t ->
-                logger.warn(t) { "Summary computation failed: ${t.message}" }
-            }
+            .doOnError { t -> logger.warn(t) { "Summary computation failed: ${t.message}" } }
             .onErrorReturn(PaymentsSummary(SummaryPart.empty(), SummaryPart.empty()))
     }
 
     private fun buildCriteria(from: Instant?, to: Instant?): Criteria {
-        val criteriaList = mutableListOf<Criteria>()
-
-        // ⚡ Filter only successful payments
-        criteriaList.add(Criteria.where("status").`is`(PaymentStatus.SUCCESS.name))
-
-        // ⚡ Date range filtering
-        from?.let { criteriaList.add(Criteria.where("requestedAt").gte(it)) }
-        to?.let { criteriaList.add(Criteria.where("requestedAt").lte(it)) }
-
-        return if (criteriaList.size > 1) {
-            Criteria().andOperator(*criteriaList.toTypedArray())
-        } else {
-            criteriaList.first()
-        }
+        val list = mutableListOf<Criteria>()
+        // ⚠️ enums PT-BR
+        list.add(Criteria.where("status").`is`(PaymentStatus.SUCESSO.name))
+        from?.let { list.add(Criteria.where("requestedAt").gte(it)) }
+        to?.let { list.add(Criteria.where("requestedAt").lte(it)) }
+        return if (list.size > 1) Criteria().andOperator(*list.toTypedArray()) else list.first()
     }
 }

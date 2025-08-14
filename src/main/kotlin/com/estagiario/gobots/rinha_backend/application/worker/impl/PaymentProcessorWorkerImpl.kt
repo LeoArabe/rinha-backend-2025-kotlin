@@ -1,8 +1,9 @@
+// application/worker/impl/PaymentProcessorWorkerImpl.kt
 package com.estagiario.gobots.rinha_backend.application.worker.impl
 
 import com.estagiario.gobots.rinha_backend.application.ports.PaymentProcessorClient
-import com.estagiario.gobots.rinha_backend.application.worker.OutboxRelay
-import com.estagiario.gobots.rinha_backend.domain.HealthCheckState
+import com.estagiario.gobots.rinha_backend.application.worker.OutboxRelayOptimized
+import com.estagiario.gobots.rinha_backend.domain.Payment
 import com.estagiario.gobots.rinha_backend.domain.PaymentEvent
 import com.estagiario.gobots.rinha_backend.domain.PaymentEventStatus
 import com.estagiario.gobots.rinha_backend.domain.PaymentStatus
@@ -11,117 +12,146 @@ import com.estagiario.gobots.rinha_backend.infrastructure.outgoing.repository.Pa
 import com.estagiario.gobots.rinha_backend.infrastructure.outgoing.repository.ProcessorHealthRepository
 import mu.KotlinLogging
 import org.springframework.beans.factory.annotation.Qualifier
+import org.springframework.beans.factory.annotation.Value
+import org.springframework.data.mongodb.core.ReactiveMongoTemplate
+import org.springframework.data.mongodb.core.query.Criteria
+import org.springframework.data.mongodb.core.query.Query
+import org.springframework.data.mongodb.core.query.Update
 import org.springframework.stereotype.Component
 import reactor.core.publisher.Mono
-import java.math.BigDecimal
+import reactor.kotlin.core.publisher.switchIfEmpty
 import java.time.Duration
 import java.time.Instant
-import java.util.*
+import java.util.UUID
 
 private val logger = KotlinLogging.logger {}
 
+/**
+ * Worker reativo que:
+ * - faz claim atômico da outbox
+ * - decide default/fallback (com base no health)
+ * - atualiza Payment com WriteConcern MAJORITY
+ * - marca o evento como PROCESSED
+ */
 @Component
 class PaymentProcessorWorkerImpl(
-    private val outbox: OutboxRelay,
+    private val relay: OutboxRelayOptimized,
     private val paymentRepo: PaymentRepository,
     private val eventRepo: PaymentEventRepository,
-    private val processorHealthRepo: ProcessorHealthRepository,
+    private val healthRepo: ProcessorHealthRepository,
+    private val mongo: ReactiveMongoTemplate,
     @Qualifier("defaultClient") private val defaultClient: PaymentProcessorClient,
-    @Qualifier("fallbackClient") private val fallbackClient: PaymentProcessorClient
+    @Qualifier("fallbackClient") private val fallbackClient: PaymentProcessorClient,
+    @Value("\${app.worker.batch-size:50}") private val batchSize: Int,
+    @Value("\${app.worker.retry-seconds:5}") private val retrySeconds: Long
 ) {
 
-    private val batchSize = 15
-    private val maxConcurrency = 3
-    private val reqTimeout = Duration.ofSeconds(4)
-
-    /**
-     * Tick: claim batch + process with controlled concurrency.
-     * Caller should call this periodically (e.g. from scheduler) passing a worker id.
-     */
-    fun tick(owner: String): Mono<Void> {
-        return outbox.claimPendingBatch(owner, batchSize)
-            .flatMap({ ev -> processEvent(ev) }, maxConcurrency)
-            .onErrorContinue { t, _ -> logger.warn(t) { "Falha ao processar tick: ${t.message}" } }
+    fun tick(owner: String): Mono<Void> =
+        relay.claimPendingBatch(owner, batchSize)
+            .flatMap { event -> processOne(owner, event) }
             .then()
-    }
 
-    private fun processEvent(ev: PaymentEvent): Mono<Void> {
-        val correlationId = UUID.fromString(ev.correlationId)
-        return paymentRepo.findByCorrelationId(ev.correlationId)
-            .switchIfEmpty(Mono.defer {
-                logger.warn { "Payment não encontrado p/ correlationId=${ev.correlationId}" }
-                Mono.empty()
-            })
-            .flatMap { payment ->
-                val amount = BigDecimal(payment.amount).movePointLeft(2)
-                val requestedAt = payment.requestedAt
-
-                tryDefaultThenFallback(correlationId, amount, requestedAt)
-                    .flatMap { usedProcessor ->
-                        val updated = payment.copy(
-                            status = PaymentStatus.SUCCESS, // 🔄 SUCESSO -> SUCCESS
-                            lastUpdatedAt = Instant.now(),
-                            processorUsed = usedProcessor
-                        )
-                        paymentRepo.save(updated).then(markProcessed(ev))
-                    }
-                    .onErrorResume { err ->
-                        logger.warn(err) { "Process failed for ${ev.correlationId}: ${err.message}" }
-                        val failed = payment.copy(
-                            status = PaymentStatus.FAILURE, // 🔄 FALHA -> FAILURE
-                            lastUpdatedAt = Instant.now(),
-                            lastErrorMessage = err.message
-                        )
-                        paymentRepo.save(failed).then(markProcessed(ev))
-                    }
+    private fun processOne(owner: String, event: PaymentEvent): Mono<Void> {
+        return paymentRepo.findByCorrelationId(event.correlationId)
+            .switchIfEmpty {
+                logger.warn { "Pagamento não encontrado para correlationId=${event.correlationId}" }
+                markEventProcessed(event.id!!, false, "Pagamento não encontrado")
+            }
+            .flatMap { payment -> dispatchToProcessor(payment) }
+            .flatMap { result -> applyResult(event, result) }
+            .onErrorResume { t ->
+                logger.warn(t) { "Falha no processamento do evento ${event.id}" }
+                scheduleRetry(event.id!!, t.message)
             }
     }
 
-    private fun tryDefaultThenFallback(
-        correlationId: UUID,
-        amount: BigDecimal,
-        requestedAt: Instant
-    ): Mono<String> {
+    private data class DispatchResult(
+        val payment: Payment,
+        val success: Boolean,
+        val processor: String?,
+        val error: String?
+    )
 
-        val defaultOkMono = processorHealthRepo.findById("default")
-            .map { it.state == HealthCheckState.HEALTHY }
-            .defaultIfEmpty(true) // if absent, assume healthy (first-start behavior)
-
-        val fallbackOkMono = processorHealthRepo.findById("fallback")
-            .map { it.state == HealthCheckState.HEALTHY }
+    private fun dispatchToProcessor(payment: Payment): Mono<DispatchResult> {
+        // Escolha de processador baseada no último health conhecido (TTL curto)
+        val chooseMono = healthRepo.findById("default")
+            .map { it.state.name == "HEALTHY" }
             .defaultIfEmpty(true)
 
-        return Mono.zip(defaultOkMono, fallbackOkMono).flatMap { pair ->
-            val defaultOk = pair.t1
-            val fallbackOk = pair.t2
+        return chooseMono.flatMap { defaultHealthy ->
+            val client = if (defaultHealthy) defaultClient else fallbackClient
+            val procName = if (defaultHealthy) "default" else "fallback"
 
-            fun attemptDefault(): Mono<String> =
-                defaultClient.process(correlationId, amount, requestedAt)
-                    .timeout(reqTimeout)
-                    .thenReturn("default")
-
-            fun attemptFallback(): Mono<String> =
-                fallbackClient.process(correlationId, amount, requestedAt)
-                    .timeout(reqTimeout)
-                    .thenReturn("fallback")
-
-            when {
-                defaultOk -> attemptDefault().onErrorResume { if (fallbackOk) attemptFallback() else Mono.error(it) }
-                fallbackOk -> attemptFallback().onErrorResume { if (defaultOk) attemptDefault() else Mono.error(it) }
-                else -> {
-                    // Neither declared healthy – try default then fallback as last resort.
-                    attemptDefault().onErrorResume { attemptFallback() }
+            client.process(
+                UUID.fromString(payment.correlationId),
+                payment.toBigDecimal(),        // assume Payment#toBigDecimal no domínio
+                payment.requestedAt
+            )
+                .timeout(Duration.ofSeconds(4))
+                .thenReturn(DispatchResult(payment, true, procName, null))
+                .onErrorResume { e ->
+                    Mono.just(DispatchResult(payment, false, procName, e.message ?: "erro desconhecido"))
                 }
-            }
         }
     }
 
-    private fun markProcessed(ev: PaymentEvent): Mono<Void> {
-        val done = ev.copy(
-            status = PaymentEventStatus.PROCESSED,
-            processedAt = Instant.now(),
-            owner = null
-        )
-        return eventRepo.save(done).then()
+    private fun applyResult(event: PaymentEvent, r: DispatchResult): Mono<Void> {
+        val now = Instant.now()
+
+        val paymentQ = Query.query(Criteria.where("correlationId").`is`(r.payment.correlationId))
+        val paymentU = if (r.success) {
+            Update()
+                .set("status", PaymentStatus.SUCESSO.name)
+                .set("processorUsed", r.processor)
+                .set("lastUpdatedAt", now)
+                .set("lastErrorMessage", null)
+        } else {
+            Update()
+                .set("status", PaymentStatus.FALHA.name)
+                .inc("attemptCount", 1)
+                .set("lastUpdatedAt", now)
+                .set("lastErrorMessage", r.error)
+                .set("nextRetryAt", now.plusSeconds(retrySeconds))
+        }
+
+        // MAJORITY para estado auditável
+        val updatePayment = mongo
+            .withWriteConcern(com.mongodb.WriteConcern.MAJORITY)
+            .updateFirst(paymentQ, paymentU, "payments")
+            .then()
+
+        val finalizeEvent = markEventProcessed(event.id!!, r.success, r.error)
+
+        return updatePayment.then(finalizeEvent)
+    }
+
+    private fun markEventProcessed(eventId: String, success: Boolean, error: String?): Mono<Void> {
+        val q = Query.query(Criteria.where("_id").`is`(eventId))
+        val u = Update()
+            .set("status", PaymentEventStatus.PROCESSADO.name)
+            .set("processedAt", Instant.now())
+            .set("error", error)
+            .set("success", success)
+
+        // W1 é suficiente para evento (não-auditável)
+        return mongo
+            .withWriteConcern(com.mongodb.WriteConcern.W1)
+            .updateFirst(q, u, "payment_events")
+            .then()
+    }
+
+    private fun scheduleRetry(eventId: String, error: String?): Mono<Void> {
+        val q = Query.query(Criteria.where("_id").`is`(eventId))
+        val u = Update()
+            .set("status", PaymentEventStatus.PENDENTE.name)
+            .set("owner", null)
+            .set("processingAt", null)
+            .set("nextRetryAt", Instant.now().plusSeconds(retrySeconds))
+            .set("error", error)
+
+        return mongo
+            .withWriteConcern(com.mongodb.WriteConcern.W1)
+            .updateFirst(q, u, "payment_events")
+            .then()
     }
 }

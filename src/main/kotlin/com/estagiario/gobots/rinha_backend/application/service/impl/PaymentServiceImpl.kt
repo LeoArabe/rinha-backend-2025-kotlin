@@ -29,7 +29,7 @@ class PaymentServiceImpl(
 ) : PaymentService {
 
     override fun processNewPayment(request: PaymentRequest): Mono<PaymentAck> {
-        // Conversão robusta para cents
+        // BigDecimal -> centavos com HALF_UP
         val amountCents = request.amount
             .movePointRight(2)
             .setScale(0, RoundingMode.HALF_UP)
@@ -39,10 +39,8 @@ class PaymentServiceImpl(
             correlationId = request.correlationId.toString(),
             amountInCents = amountCents
         )
+        val event = PaymentEvent.newProcessPaymentEvent(payment.correlationId)
 
-        val event = PaymentEvent.newProcessPaymentEvent(request.correlationId.toString())
-
-        // Salva em paralelo com tratamento de duplicata idempotente
         return Mono.when(
             paymentRepo.save(payment)
                 .onErrorResume(DuplicateKeyException::class.java) { Mono.empty() },
@@ -61,43 +59,35 @@ class PaymentServiceImpl(
         return processorHealthRepo.findAll()
             .collectMap(
                 { it.processor },
-                { processor ->
+                { p ->
                     mapOf(
-                        "state" to processor.state.name,
-                        "latencyMs" to processor.latencyMs,
-                        "lastCheckedAt" to processor.lastCheckedAt,
-                        "checkedBy" to processor.checkedBy
+                        "state" to p.state.name,
+                        "latencyMs" to p.latencyMs,
+                        "lastCheckedAt" to p.lastCheckedAt,
+                        "checkedBy" to p.checkedBy
                     )
                 }
             )
-            .map { healthMap ->
-                val isHealthy = healthMap.values.all { processorInfo ->
-                    (processorInfo["state"] as? String) == HealthCheckState.HEALTHY.name
-                }
-
+            .map { map ->
+                val healthy = map.values.all { (it["state"] as? String) == HealthCheckState.HEALTHY.name }
                 HealthCheckResponse(
-                    isHealthy = isHealthy,
-                    details = mapOf(
-                        "processors" to healthMap,
-                        "status" to if (isHealthy) "healthy" else "degraded"
-                    )
+                    isHealthy = healthy,
+                    details = mapOf("processors" to map, "status" to if (healthy) "healthy" else "degraded")
                 )
             }
             .defaultIfEmpty(
                 HealthCheckResponse(
-                    isHealthy = true, // Assume healthy se não tem dados
+                    isHealthy = true,
                     details = mapOf("status" to "no_data", "processors" to emptyMap<String, Any>())
                 )
             )
     }
 
-    override fun testPersistence(): Mono<Void> {
-        return mongoTemplate.execute("test") { collection ->
-            collection.insertOne(org.bson.Document("test", true))
+    override fun testPersistence(): Mono<Void> =
+        mongoTemplate.execute("test") { coll ->
+            coll.insertOne(org.bson.Document("test", true))
         }.then()
-    }
 
-    override fun getPaymentStatus(correlationId: String): Mono<Payment> {
-        return paymentRepo.findByCorrelationId(correlationId)
-    }
+    override fun getPaymentStatus(correlationId: String): Mono<Payment> =
+        paymentRepo.findByCorrelationId(correlationId)
 }

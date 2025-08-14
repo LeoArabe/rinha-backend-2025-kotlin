@@ -10,9 +10,6 @@ import java.time.Instant
 
 @Repository
 interface PaymentEventRepository : ReactiveMongoRepository<PaymentEvent, String> {
-    /**
-     * Finds pending events that are ready to be processed, ordered by creation time.
-     */
     @Query("{ 'status': ?0, 'nextRetryAt': { '\$lte': ?1 } }")
     fun findPendingEvents(status: PaymentEventStatus, before: Instant): Flux<PaymentEvent>
 }

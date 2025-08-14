@@ -1,6 +1,3 @@
-// CRIE ESTE FICHEIRO EM:
-// src/main/kotlin/com/estagiario/gobots/rinha_backend/infrastructure/config/CoroutineScopeConfig.kt
-
 package com.estagiario.gobots.rinha_backend.infrastructure.config
 
 import kotlinx.coroutines.CoroutineScope

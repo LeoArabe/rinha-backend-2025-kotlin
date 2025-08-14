@@ -33,21 +33,17 @@ class MongoOptimizedConfig : AbstractReactiveMongoConfiguration() {
 
     override fun configureClientSettings(builder: MongoClientSettings.Builder) {
         val connectionString = ConnectionString(mongoUri)
-
         builder.applyConnectionString(connectionString)
-            .writeConcern(WriteConcern.W1) // ⚡ Performance: w:1 ao invés de majority
-            .readConcern(ReadConcern.AVAILABLE) // ⚡ Less strict read consistency
+            .writeConcern(WriteConcern.W1)
+            .readConcern(ReadConcern.AVAILABLE)
             .readPreference(ReadPreference.primaryPreferred())
-            .applyToConnectionPoolSettings { poolBuilder ->
-                poolBuilder
-                    .maxSize(20) // ⚡ Connection pool otimizado
-                    .minSize(5)
+            .applyToConnectionPoolSettings {
+                it.maxSize(20).minSize(5)
                     .maxWaitTime(2, TimeUnit.SECONDS)
                     .maxConnectionIdleTime(30, TimeUnit.SECONDS)
             }
-            .applyToSocketSettings { socketBuilder ->
-                socketBuilder
-                    .connectTimeout(2, TimeUnit.SECONDS)
+            .applyToSocketSettings {
+                it.connectTimeout(2, TimeUnit.SECONDS)
                     .readTimeout(10, TimeUnit.SECONDS)
             }
     }
@@ -55,14 +51,11 @@ class MongoOptimizedConfig : AbstractReactiveMongoConfiguration() {
     @Bean
     fun initializeOptimizedIndexes(mongoTemplate: ReactiveMongoTemplate): ApplicationRunner {
         return ApplicationRunner {
-            val allIndexes = Flux.concat(
+            Flux.concat(
                 createPaymentIndexes(mongoTemplate),
                 createPaymentEventIndexes(mongoTemplate),
-                createProcessorHealthIndexes(mongoTemplate),
-                createLeaderLockIndexes(mongoTemplate)
-            )
-
-            allIndexes.then()
+                createProcessorHealthIndexes(mongoTemplate)
+            ).then()
                 .subscribe(
                     { logger.info { "✅ All MongoDB indexes created successfully" } },
                     { error -> logger.error(error) { "🔥 Failed to create MongoDB indexes" } }
@@ -71,47 +64,27 @@ class MongoOptimizedConfig : AbstractReactiveMongoConfiguration() {
     }
 
     private fun createPaymentIndexes(mongoTemplate: ReactiveMongoTemplate): Flux<String> {
-        val paymentIndexOps = mongoTemplate.indexOps("payments")
-
-        val correlationIdIndex = Index()
-            .on("correlationId", Sort.Direction.ASC)
-            .unique()
-            .named("correlation_unique_idx")
-
-        // ⚡ Índice otimizado para summary queries
+        val ops = mongoTemplate.indexOps("payments")
+        val correlationIdIndex = Index().on("correlationId", Sort.Direction.ASC).unique()
         val summaryIndex = CompoundIndexDefinition(
-            org.bson.Document(mapOf(
-                "status" to 1,
-                "requestedAt" to 1,
-                "processorUsed" to 1
-            ))
-        ).named("summary_optimized_idx")
-
+            org.bson.Document(mapOf("status" to 1, "requestedAt" to 1, "processorUsed" to 1))
+        )
         return Flux.concat(
-            paymentIndexOps.ensureIndex(correlationIdIndex),
-            paymentIndexOps.ensureIndex(summaryIndex)
-        ).doOnNext { logger.info { "Index ensured on 'payments': $it" } }
+            ops.ensureIndex(correlationIdIndex),
+            ops.ensureIndex(summaryIndex)
+        )
     }
 
     private fun createPaymentEventIndexes(mongoTemplate: ReactiveMongoTemplate): Flux<String> {
-        val eventIndexOps = mongoTemplate.indexOps("payment_events")
-
-        // ⚡ Índice otimizado para outbox queries
+        val ops = mongoTemplate.indexOps("payment_events")
         val outboxIndex = CompoundIndexDefinition(
-            org.bson.Document(mapOf(
-                "status" to 1,
-                "createdAt" to 1
-            ))
-        ).named("outbox_processing_idx")
-
-        val correlationIndex = Index()
-            .on("correlationId", Sort.Direction.ASC)
-            .named("event_correlation_idx")
-
+            org.bson.Document(mapOf("status" to 1, "createdAt" to 1))
+        )
+        val correlationIndex = Index().on("correlationId", Sort.Direction.ASC)
         return Flux.concat(
-            eventIndexOps.ensureIndex(outboxIndex),
-            eventIndexOps.ensureIndex(correlationIndex)
-        ).doOnNext { logger.info { "Index ensured on 'payment_events': $it" } }
+            ops.ensureIndex(outboxIndex),
+            ops.ensureIndex(correlationIndex)
+        )
     }
 
     private fun createProcessorHealthIndexes(mongoTemplate: ReactiveMongoTemplate): Flux<String> {
@@ -119,23 +92,6 @@ class MongoOptimizedConfig : AbstractReactiveMongoConfiguration() {
         val ttlIndex = Index()
             .on("expireAt", Sort.Direction.ASC)
             .expire(java.time.Duration.ZERO)
-            .named("processor_health_ttl_idx")
-
-        return ops.ensureIndex(ttlIndex)
-            .doOnNext { logger.info { "Index ensured on 'processor_health': $it" } }
-            .flux()
-    }
-
-    private fun createLeaderLockIndexes(mongoTemplate: ReactiveMongoTemplate): Flux<String> {
-        val lockIndexOps = mongoTemplate.indexOps("leader_locks")
-
-        val ttlIndex = Index()
-            .on("expireAt", Sort.Direction.ASC)
-            .expire(java.time.Duration.ZERO)
-            .named("leader_lock_ttl_idx")
-
-        return lockIndexOps.ensureIndex(ttlIndex)
-            .doOnNext { logger.info { "Index ensured on 'leader_locks': $it" } }
-            .flux()
+        return ops.ensureIndex(ttlIndex).flux()
     }
 }

@@ -4,41 +4,47 @@ import org.springframework.data.annotation.Id
 import org.springframework.data.mongodb.core.mapping.Document
 import java.time.Instant
 
-/**
- * Outbox event / payment processing lifecycle.
- * Coleção: payment_events
- */
 @Document("payment_events")
 data class PaymentEvent(
     @Id
     val id: String? = null,
+    val paymentId: String,
     val correlationId: String,
     val status: PaymentEventStatus,
     val createdAt: Instant,
-    val owner: String? = null,
     val processingAt: Instant? = null,
     val processedAt: Instant? = null,
+    val owner: String? = null,
     val nextRetryAt: Instant? = null
 ) {
     companion object {
-        fun newProcessPaymentEvent(correlationId: String): PaymentEvent {
+        fun newEvent(payment: Payment): PaymentEvent {
+            val now = Instant.now()
             return PaymentEvent(
-                correlationId = correlationId,
+                paymentId = payment.id ?: error("Payment ID cannot be null"),
+                correlationId = payment.correlationId,
                 status = PaymentEventStatus.PENDING,
-                createdAt = Instant.now()
+                createdAt = now
             )
         }
     }
 
-    /**
-     * Marca para processamento por um owner (não persiste; retorna cópia)
-     */
     fun claimForProcessing(ownerId: String): PaymentEvent =
-        this.copy(status = PaymentEventStatus.PROCESSING, owner = ownerId, processingAt = Instant.now())
+        this.copy(
+            status = PaymentEventStatus.PROCESSING,
+            owner = ownerId,
+            processingAt = Instant.now()
+        )
 
-    /**
-     * Marca como processado (retira owner)
-     */
-    fun markProcessed(): PaymentEvent =
-        this.copy(status = PaymentEventStatus.PROCESSED, processedAt = Instant.now(), owner = null)
+    fun markAsProcessed(): PaymentEvent =
+        this.copy(
+            status = PaymentEventStatus.PROCESSED,
+            processedAt = Instant.now()
+        )
+
+    fun markAsFailed(nextRetry: Instant?): PaymentEvent =
+        this.copy(
+            status = PaymentEventStatus.FAILED,
+            nextRetryAt = nextRetry
+        )
 }

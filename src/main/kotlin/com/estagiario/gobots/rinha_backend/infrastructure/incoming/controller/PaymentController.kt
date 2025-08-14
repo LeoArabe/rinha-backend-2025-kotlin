@@ -2,9 +2,7 @@ package com.estagiario.gobots.rinha_backend.infrastructure.incoming.controller
 
 import com.estagiario.gobots.rinha_backend.application.dto.PaymentRequest
 import com.estagiario.gobots.rinha_backend.application.service.PaymentService
-import com.estagiario.gobots.rinha_backend.domain.exception.PaymentProcessingException
-import com.estagiario.gobots.rinha_backend.infrastructure.incoming.dto.PaymentRequest as IncomingPaymentRequest
-import com.estagiario.gobots.rinha_backend.infrastructure.incoming.dto.PaymentStatusResponse
+import com.estagiario.gobots.rinha_backend.domain.exception.PaymentNotFoundException
 import jakarta.validation.Valid
 import mu.KotlinLogging
 import org.springframework.http.ResponseEntity
@@ -21,76 +19,25 @@ class PaymentController(
 ) {
 
     @PostMapping
-    fun createPayment(@Valid @RequestBody request: IncomingPaymentRequest): Mono<ResponseEntity<Map<String, String>>> {
+    fun createPayment(@Valid @RequestBody request: PaymentRequest): Mono<ResponseEntity<Map<String, String>>> {
         val correlationId = UUID.randomUUID()
+        val reqWithId = request.copy(correlationId = correlationId)
 
-        // Converte DTO de entrada para DTO de aplicação
-        val appRequest = PaymentRequest(
-            correlationId = correlationId,
-            amount = request.amount
-        )
-
-        return paymentService.processNewPayment(appRequest)
-            .map {
-                ResponseEntity.accepted().body(mapOf("correlationId" to correlationId.toString()))
-            }
-            .doOnSuccess {
-                logger.info { "message=\"Pagamento aceito com sucesso\" correlationId=$correlationId" }
-            }
-            .onErrorResume { error: Throwable ->
-                when (error) {
-                    is PaymentProcessingException -> {
-                        logger.error(error) { "message=\"Erro ao processar pagamento\" correlationId=$correlationId" }
-                        Mono.just(ResponseEntity.internalServerError().build())
-                    }
-                    else -> {
-                        logger.error(error) { "message=\"Erro inesperado\" correlationId=$correlationId" }
-                        Mono.just(ResponseEntity.badRequest().build())
-                    }
-                }
-            }
-    }
-
-    @GetMapping("/health")
-    fun healthCheck(): Mono<ResponseEntity<Any>> {
-        return paymentService.performHealthCheck()
-            .map { health ->
-                if (health.isHealthy) {
-                    ResponseEntity.ok().body<Any>(health.details)
-                } else {
-                    ResponseEntity.status(503).body<Any>(health.details)
-                }
-            }
-            .onErrorResume { error: Throwable ->
-                logger.error(error) { "message=\"Health check falhou gravemente\"" }
-                Mono.just(ResponseEntity.status(500).body(mapOf("status" to "critical_error")))
-            }
-    }
-
-    @PostMapping("/test")
-    fun testMongoPersistence(): Mono<ResponseEntity<Void>> {
-        return paymentService.testPersistence()
-            .map { ResponseEntity.ok().build<Void>() }
-            .onErrorResume { error: Throwable ->
-                logger.error(error) { "message=\"Teste de persistência falhou\"" }
+        return paymentService.processNewPayment(reqWithId)
+            .map { ResponseEntity.accepted().body(mapOf("correlationId" to correlationId.toString())) }
+            .onErrorResume {
+                logger.error(it) { "Erro ao criar pagamento" }
                 Mono.just(ResponseEntity.internalServerError().build())
             }
     }
 
     @GetMapping("/{correlationId}/status")
-    fun getPaymentStatus(@PathVariable correlationId: String): Mono<ResponseEntity<PaymentStatusResponse>> {
+    fun getPaymentStatus(@PathVariable correlationId: String): Mono<ResponseEntity<Any>> {
         return paymentService.getPaymentStatus(correlationId)
-            .map { payment ->
-                val response = PaymentStatusResponse(
-                    correlationId = payment.correlationId,
-                    status = payment.status.name,
-                    amount = payment.amount,
-                    createdAt = payment.createdAt,
-                    processor = payment.processorUsed,
-                    errorMessage = payment.lastErrorMessage
-                )
-                ResponseEntity.ok(response)
+            .map { ResponseEntity.ok(it) }
+            .switchIfEmpty(Mono.error(PaymentNotFoundException("Pagamento não encontrado")))
+            .onErrorResume(PaymentNotFoundException::class.java) {
+                Mono.just(ResponseEntity.notFound().build())
             }
-            .defaultIfEmpty(ResponseEntity.notFound().build())
     }
 }

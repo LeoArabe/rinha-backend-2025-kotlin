@@ -3,18 +3,18 @@ package com.estagiario.gobots.rinha_backend.domain
 import org.springframework.data.annotation.Id
 import org.springframework.data.mongodb.core.index.Indexed
 import org.springframework.data.mongodb.core.mapping.Document
-import java.time.Instant
 import java.math.BigDecimal
+import java.time.Instant
 
 @Document("payments")
 data class Payment(
     @Id
     val id: String? = null,
 
-    @Indexed(unique = true)  // ⚡ Índice único para performance
+    @Indexed(unique = true)
     val correlationId: String,
 
-    val amount: Long, // Centavos
+    val amount: Long, // em centavos
     val status: PaymentStatus,
     val requestedAt: Instant,
     val lastUpdatedAt: Instant,
@@ -39,7 +39,15 @@ data class Payment(
 
     val createdAt: Instant get() = requestedAt
 
-    fun toBigDecimal(): BigDecimal = BigDecimal.valueOf(amount, 2)
+    fun toBigDecimal(): BigDecimal =
+        BigDecimal.valueOf(amount, 2)
+
+    fun markAsProcessing(processor: String): Payment =
+        this.copy(
+            status = PaymentStatus.PROCESSING,
+            processorUsed = processor,
+            lastUpdatedAt = Instant.now()
+        )
 
     fun markAsFailed(message: String?): Payment =
         this.copy(
@@ -52,6 +60,13 @@ data class Payment(
         this.copy(
             status = PaymentStatus.SUCCESS,
             processorUsed = processor,
+            lastUpdatedAt = Instant.now()
+        )
+
+    fun incrementAttempts(nextRetry: Instant?): Payment =
+        this.copy(
+            attemptCount = attemptCount + 1,
+            nextRetryAt = nextRetry,
             lastUpdatedAt = Instant.now()
         )
 }

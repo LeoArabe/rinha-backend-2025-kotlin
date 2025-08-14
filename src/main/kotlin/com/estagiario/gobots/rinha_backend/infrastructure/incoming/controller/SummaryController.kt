@@ -26,28 +26,26 @@ class SummaryController(
         @RequestParam("from") from: Instant,
         @RequestParam("to") to: Instant
     ): Mono<ResponseEntity<PaymentSummaryResponse>> {
-
-        // Validação de range
         if (from.isAfter(to)) {
             return Mono.just(ResponseEntity.badRequest().build())
         }
 
         return summaryService.compute(from, to)
             .map { summary ->
-                // Converte DTO de aplicação para DTO de resposta
-                val response = PaymentSummaryResponse(
-                    defaultProcessor = ProcessorSummary(
-                        totalRequests = summary.default.totalRequests,
-                        totalAmount = summary.default.totalAmount
-                    ),
-                    fallbackProcessor = ProcessorSummary(
-                        totalRequests = summary.fallback.totalRequests,
-                        totalAmount = summary.fallback.totalAmount
+                ResponseEntity.ok(
+                    PaymentSummaryResponse(
+                        defaultProcessor = ProcessorSummary(
+                            totalRequests = summary.default.totalRequests,
+                            totalAmount = summary.default.totalAmount
+                        ),
+                        fallbackProcessor = ProcessorSummary(
+                            totalRequests = summary.fallback.totalRequests,
+                            totalAmount = summary.fallback.totalAmount
+                        )
                     )
                 )
-                ResponseEntity.ok(response)
             }
-            .onErrorResume { error: Throwable ->
+            .onErrorResume { error ->
                 when (error) {
                     is InvalidDateRangeException -> {
                         logger.warn(error) { "Invalid date range provided" }

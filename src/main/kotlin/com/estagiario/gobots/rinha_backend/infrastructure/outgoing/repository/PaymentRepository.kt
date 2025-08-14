@@ -9,5 +9,5 @@ import reactor.core.publisher.Mono
 @Repository
 interface PaymentRepository : ReactiveMongoRepository<Payment, String> {
     fun findAllByCorrelationIdIn(correlationIds: List<String>): Flux<Payment>
-    fun findByCorrelationId(correlationId: String): Mono<Payment> // Método adicionado
+    fun findByCorrelationId(correlationId: String): Mono<Payment>
 }

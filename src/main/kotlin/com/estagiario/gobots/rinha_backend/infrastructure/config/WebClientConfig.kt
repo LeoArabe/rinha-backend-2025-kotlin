@@ -14,41 +14,29 @@ import java.time.Duration
 @Configuration
 class WebClientConfig {
 
-    @Bean("defaultProcessorWebClient")
-    fun defaultProcessorWebClient(
-        @Value("\${app.processor.default.url}") baseUrl: String,
-        @Value("\${payment.circuit-breaker.request-timeout-seconds:4}") requestTimeout: Long
-    ): WebClient {
+    private fun buildClient(baseUrl: String, timeout: Long): WebClient {
         val httpClient = HttpClient.create()
             .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, 2_000)
-            .responseTimeout(Duration.ofSeconds(requestTimeout))
-            .doOnConnected { conn ->
-                conn.addHandlerLast(ReadTimeoutHandler(requestTimeout.toInt()))
-                conn.addHandlerLast(WriteTimeoutHandler(requestTimeout.toInt()))
+            .responseTimeout(Duration.ofSeconds(timeout))
+            .doOnConnected {
+                it.addHandlerLast(ReadTimeoutHandler(timeout.toInt()))
+                it.addHandlerLast(WriteTimeoutHandler(timeout.toInt()))
             }
-
         return WebClient.builder()
             .baseUrl(baseUrl)
             .clientConnector(ReactorClientHttpConnector(httpClient))
             .build()
     }
+
+    @Bean("defaultProcessorWebClient")
+    fun defaultProcessorWebClient(
+        @Value("\${app.processor.default.url}") baseUrl: String,
+        @Value("\${payment.circuit-breaker.request-timeout-seconds:4}") timeout: Long
+    ): WebClient = buildClient(baseUrl, timeout)
 
     @Bean("fallbackProcessorWebClient")
     fun fallbackProcessorWebClient(
         @Value("\${app.processor.fallback.url}") baseUrl: String,
-        @Value("\${payment.circuit-breaker.request-timeout-seconds:4}") requestTimeout: Long
-    ): WebClient {
-        val httpClient = HttpClient.create()
-            .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, 2_000)
-            .responseTimeout(Duration.ofSeconds(requestTimeout))
-            .doOnConnected { conn ->
-                conn.addHandlerLast(ReadTimeoutHandler(requestTimeout.toInt()))
-                conn.addHandlerLast(WriteTimeoutHandler(requestTimeout.toInt()))
-            }
-
-        return WebClient.builder()
-            .baseUrl(baseUrl)
-            .clientConnector(ReactorClientHttpConnector(httpClient))
-            .build()
-    }
+        @Value("\${payment.circuit-breaker.request-timeout-seconds:4}") timeout: Long
+    ): WebClient = buildClient(baseUrl, timeout)
 }
