@@ -3,49 +3,57 @@ package com.estagiario.gobots.rinha_backend.application.worker
 import com.estagiario.gobots.rinha_backend.domain.PaymentEvent
 import com.estagiario.gobots.rinha_backend.domain.PaymentEventStatus
 import com.estagiario.gobots.rinha_backend.infrastructure.outgoing.repository.PaymentEventRepository
-import mu.KotlinLogging
+import org.springframework.data.mongodb.core.ReactiveMongoTemplate
+import org.springframework.data.mongodb.core.query.Criteria
+import org.springframework.data.mongodb.core.query.Query
+import org.springframework.data.mongodb.core.query.Update
 import org.springframework.stereotype.Component
 import reactor.core.publisher.Flux
 import reactor.core.publisher.Mono
 import java.time.Instant
 
-private val logger = KotlinLogging.logger {}
-
 @Component
 class OutboxRelay(
+    private val template: ReactiveMongoTemplate,
     private val paymentEventRepository: PaymentEventRepository
 ) {
+    fun claimBatch(ownerId: String, limit: Int): Flux<PaymentEvent> {
+        val now = Instant.now()
 
-    fun claimBatch(ownerId: String, limit: Long): Flux<PaymentEvent> {
-        return paymentEventRepository.findByStatusOrderByCreatedAtAsc(PaymentEventStatus.PENDING)
-            .take(limit)
-            .flatMap { event: PaymentEvent ->
-                val updated = event.copy(
-                    status = PaymentEventStatus.PROCESSING,
-                    owner = ownerId,
-                    processingAt = Instant.now()
-                )
-                paymentEventRepository.save(updated)
+        // ✅ Uses the new, cleaner repository method
+        return paymentEventRepository.findPendingEvents(PaymentEventStatus.PENDING, now)
+            .take(limit.toLong())
+            .collectList()
+            .flatMapMany { events ->
+                if (events.isEmpty()) {
+                    return@flatMapMany Flux.empty()
+                }
+
+                val idsToClaim = events.mapNotNull { it.id }
+                val claimUpdate = Update()
+                    .set("status", PaymentEventStatus.PROCESSING.name)
+                    .set("owner", ownerId)
+                    .set("processingAt", now)
+
+                val claimQuery = Query.query(Criteria.where("_id").`in`(idsToClaim))
+
+                template.updateMulti(claimQuery, claimUpdate, PaymentEvent::class.java)
+                    .flatMapMany { result ->
+                        if (result.modifiedCount > 0) {
+                            Flux.fromIterable(events.filter { idsToClaim.contains(it.id) })
+                                .map { it.markAsProcessing(ownerId) }
+                        } else {
+                            Flux.empty()
+                        }
+                    }
             }
     }
 
     fun markAsProcessed(event: PaymentEvent): Mono<PaymentEvent> {
-        val updatedEvent = event.copy(
-            status = PaymentEventStatus.PROCESSED,
-            processedAt = Instant.now(),
-            owner = null
-        )
-        return paymentEventRepository.save(updatedEvent)
+        return paymentEventRepository.save(event.markAsProcessed())
     }
 
-    // ✅ ASSINATURA CORRIGIDA: Recebe 'delaySeconds' como Long
-    fun scheduleForRetry(event: PaymentEvent, delaySeconds: Long): Mono<PaymentEvent> {
-        val updatedEvent = event.copy(
-            status = PaymentEventStatus.PENDING,
-            nextRetryAt = Instant.now().plusSeconds(delaySeconds),
-            owner = null,
-            processingAt = null
-        )
-        return paymentEventRepository.save(updatedEvent)
+    fun scheduleForRetry(event: PaymentEvent, delaySeconds: Long, error: String?): Mono<PaymentEvent> {
+        return paymentEventRepository.save(event.scheduleForRetry(delaySeconds, error))
     }
 }

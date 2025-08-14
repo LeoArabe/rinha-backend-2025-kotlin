@@ -1,17 +1,18 @@
 package com.estagiario.gobots.rinha_backend.application.worker.impl
 
-import com.estagiario.gobots.rinha_backend.application.service.impl.PaymentServiceImpl
+import com.estagiario.gobots.rinha_backend.application.service.PaymentService
 import com.estagiario.gobots.rinha_backend.application.worker.OutboxRelay
 import com.estagiario.gobots.rinha_backend.domain.Payment
 import com.estagiario.gobots.rinha_backend.domain.PaymentEvent
 import com.estagiario.gobots.rinha_backend.domain.PaymentStatus
 import com.estagiario.gobots.rinha_backend.infrastructure.client.dto.ProcessorPaymentRequest
 import com.estagiario.gobots.rinha_backend.infrastructure.outgoing.repository.PaymentRepository
-import jakarta.annotation.PostConstruct // ✅ IMPORT ADICIONADO
+import jakarta.annotation.PostConstruct
 import mu.KotlinLogging
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Component
 import org.springframework.web.reactive.function.client.WebClient
+import org.springframework.web.reactive.function.client.bodyToMono
 import reactor.core.publisher.Flux
 import reactor.core.publisher.Mono
 import java.math.BigDecimal
@@ -25,7 +26,7 @@ private val logger = KotlinLogging.logger {}
 class PaymentProcessorWorkerImpl(
     private val outboxRelay: OutboxRelay,
     private val paymentRepository: PaymentRepository,
-    private val paymentService: PaymentServiceImpl,
+    private val paymentService: PaymentService,
     private val webClientBuilder: WebClient.Builder,
     @Value("\${app.run-mode:api}") private val runMode: String,
     @Value("\${app.instance-id:WORKER-LOCAL}") private val instanceId: String,
@@ -41,15 +42,12 @@ class PaymentProcessorWorkerImpl(
 
     @PostConstruct
     fun startProcessingLoop() {
-        if (!runMode.equals("hybrid", true) && !runMode.equals("worker", true)) {
-            logger.info { "Worker disabled for run-mode '$runMode'" }
+        if (!runMode.contains("worker", ignoreCase = true) && !runMode.contains("hybrid", ignoreCase = true)) {
             return
         }
 
-        logger.info { "Starting OutboxRelay worker loop with ownerId='$instanceId'" }
-
         Flux.interval(Duration.ofMillis(processingDelayMs))
-            .flatMap { _ -> outboxRelay.claimBatch(instanceId, batchSize) }
+            .flatMap { _ -> outboxRelay.claimBatch(instanceId, batchSize.toInt()) }
             .flatMap { event -> processSingleEvent(event) }
             .onErrorContinue { err, _ -> logger.error(err) { "Unhandled error in worker loop" } }
             .subscribe()
@@ -66,15 +64,14 @@ class PaymentProcessorWorkerImpl(
 
                 callProcessor(defaultClient, request, "default")
                     .onErrorResume {
-                        logger.warn { "Default processor failed for ${payment.correlationId}, trying fallback..." }
                         callProcessor(fallbackClient, request, "fallback")
                     }
                     .flatMap { processor ->
-                        paymentService.updatePaymentStatus(payment, PaymentStatus.SUCESSO, processor)
-                            .flatMap { outboxRelay.markAsProcessed(event) } // ✅ FlatMap para manter o fluxo
+                        paymentService.updatePaymentStatus(payment, PaymentStatus.SUCCESS, processor, null)
+                            .then(outboxRelay.markAsProcessed(event))
                     }
-                    .onErrorResume { error ->
-                        handleProcessingError(event, payment, error) // ✅ Retorna Mono<PaymentEvent>
+                    .onErrorResume { error: Throwable ->
+                        handleProcessingError(event, error)
                     }
             }
             .then()
@@ -82,22 +79,25 @@ class PaymentProcessorWorkerImpl(
 
     private fun callProcessor(client: WebClient, request: ProcessorPaymentRequest, processorName: String): Mono<String> {
         return client.post().uri("/payments").bodyValue(request).retrieve()
-            .bodyToMono(String::class.java)
+            .bodyToMono<Map<String, Any>>()
             .timeout(Duration.ofSeconds(requestTimeoutSeconds))
             .thenReturn(processorName)
     }
 
-    private fun handleProcessingError(event: PaymentEvent, payment: Payment, error: Throwable): Mono<PaymentEvent> {
-        val newAttemptCount = payment.attemptCount + 1
+    private fun handleProcessingError(event: PaymentEvent, error: Throwable): Mono<PaymentEvent> {
+        val newAttemptCount = event.attemptCount + 1
         if (newAttemptCount >= maxAttempts) {
-            logger.error(error) { "Final attempt failed for ${payment.correlationId}. Marking as FALHA." }
-            return paymentService.updatePaymentStatus(payment, PaymentStatus.FALHA, "all", error.message)
-                .flatMap { outboxRelay.markAsProcessed(event) } // Para de processar
+            logger.error(error) { "Final attempt failed for ${event.correlationId}. Marking as FAILED." }
+            return paymentRepository.findByCorrelationId(event.correlationId)
+                .flatMap { payment ->
+                    paymentService.updatePaymentStatus(payment, PaymentStatus.FAILURE, "none", error.message)
+                }
+                // ✅ CORREÇÃO: Usa flatMap para manter o tipo PaymentEvent na cadeia reativa
+                .flatMap { outboxRelay.markAsProcessed(event) }
         } else {
-            val delay = 2L.shl(newAttemptCount - 1) // Backoff: 2, 4, 8...
-            logger.warn(error) { "Attempt $newAttemptCount failed for ${payment.correlationId}. Retrying in ${delay}s." }
-            return paymentRepository.save(payment.copy(attemptCount = newAttemptCount))
-                .flatMap { outboxRelay.scheduleForRetry(event, delay) } // ✅ Passa o Long diretamente
+            val delay = 2L.shl(newAttemptCount - 1)
+            logger.warn(error) { "Attempt $newAttemptCount for ${event.correlationId}. Retrying in ${delay}s." }
+            return outboxRelay.scheduleForRetry(event, delay, error.message)
         }
     }
 }

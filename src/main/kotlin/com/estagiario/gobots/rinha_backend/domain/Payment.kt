@@ -1,5 +1,6 @@
 package com.estagiario.gobots.rinha_backend.domain
 
+import com.estagiario.gobots.rinha_backend.domain.PaymentStatus
 import org.springframework.data.annotation.Id
 import org.springframework.data.mongodb.core.index.Indexed
 import org.springframework.data.mongodb.core.mapping.Document
@@ -14,38 +15,38 @@ data class Payment(
     val requestedAt: Instant,
     val lastUpdatedAt: Instant,
     val processorUsed: String? = null,
-    val lastErrorMessage: String? = null,
-    val attemptCount: Int = 0,
-    val nextRetryAt: Instant? = null
+    val lastErrorMessage: String? = null
 ) {
     companion object {
-        fun newPayment(correlationId: String, amount: Long): Payment {
-            val now = Instant.now()
-            return Payment(
-                correlationId = correlationId,
-                amount = amount,
-                status = PaymentStatus.RECEBIDO,
-                requestedAt = now,
-                lastUpdatedAt = now
-            )
-        }
-
-        // ✅ GARANTA QUE ESTE MÉTODO ESTÁ AQUI DENTRO
         fun newPending(correlationId: String, amountCents: Long): Payment {
             val now = Instant.now()
             return Payment(
                 correlationId = correlationId,
                 amount = amountCents,
-                status = PaymentStatus.PROCESSANDO,
+                status = PaymentStatus.PROCESSING,
                 requestedAt = now,
                 lastUpdatedAt = now
             )
         }
     }
 
-    val createdAt: Instant get() = requestedAt
-
-    fun toBigDecimal(): java.math.BigDecimal {
-        return java.math.BigDecimal(amount).divide(java.math.BigDecimal(100))
+    fun markAsSuccessful(processor: String): Payment {
+        return this.copy(
+            status = PaymentStatus.SUCCESS,
+            processorUsed = processor,
+            lastUpdatedAt = Instant.now(),
+            lastErrorMessage = null
+        )
     }
+
+    fun markAsFailed(error: String?, processor: String = "none"): Payment {
+        return this.copy(
+            status = PaymentStatus.FAILURE,
+            lastErrorMessage = error,
+            processorUsed = processor,
+            lastUpdatedAt = Instant.now()
+        )
+    }
+
+    val createdAt: Instant get() = requestedAt
 }

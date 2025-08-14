@@ -12,8 +12,9 @@ data class HealthStatus(
 
 interface PaymentService {
     fun processNewPayment(request: PaymentRequest): Mono<Void>
-    fun performHealthCheck(): Mono<HealthStatus>
     fun getPaymentStatus(correlationId: String): Mono<Payment>
-    fun testPersistence(): Mono<Void>
     fun updatePaymentStatus(payment: Payment, newStatus: PaymentStatus, processor: String?, error: String? = null): Mono<Payment>
+
+    fun performHealthCheck(): Mono<HealthStatus>
+    fun testPersistence(): Mono<Void>
 }

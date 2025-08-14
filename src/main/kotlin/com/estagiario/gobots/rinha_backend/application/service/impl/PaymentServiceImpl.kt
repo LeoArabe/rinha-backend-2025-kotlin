@@ -37,45 +37,33 @@ class PaymentServiceImpl(
             Mono.zip(
                 paymentRepository.save(payment),
                 paymentEventRepository.save(event)
-            )
-                .doOnSuccess {
-                    logger.info { "message=\"Payment and Event persisted\" correlationId=${request.correlationId}" }
-                }
-                .doOnError { ex ->
-                    logger.error(ex) { "message=\"Error persisting payment/event\" correlationId=${request.correlationId}" }
-                }
-                .then()
-        } catch (e: ArithmeticException) {
-            val msg = "Invalid amount format for correlationId=${request.correlationId}"
-            logger.warn(e) { msg }
-            Mono.error(PaymentProcessingException(msg, e))
+            ).then()
         } catch (e: Exception) {
-            val msg = "Failed to create payment for correlationId=${request.correlationId}"
-            logger.error(e) { msg }
-            Mono.error(PaymentProcessingException(msg, e))
+            Mono.error(PaymentProcessingException("Failed to create payment for ${request.correlationId}", e))
         }
     }
 
-    // ✅ CORREÇÃO: Adicionada a palavra-chave "override"
     override fun updatePaymentStatus(payment: Payment, newStatus: PaymentStatus, processor: String?, error: String?): Mono<Payment> {
-        val updatedPayment = payment.copy(
-            status = newStatus,
-            processorUsed = processor,
-            lastErrorMessage = error,
-            lastUpdatedAt = Instant.now()
-        )
+        val updatedPayment = when (newStatus) {
+            PaymentStatus.SUCCESS -> payment.markAsSuccessful(processor ?: "unknown")
+            PaymentStatus.FAILURE -> payment.markAsFailed(error, processor ?: "none")
+            else -> payment.copy(status = newStatus)
+        }
         return paymentRepository.save(updatedPayment)
-    }
-
-    override fun performHealthCheck(): Mono<HealthStatus> {
-        return Mono.just(HealthStatus(true, mapOf("database" to "ok")))
     }
 
     override fun getPaymentStatus(correlationId: String): Mono<Payment> {
         return paymentRepository.findByCorrelationId(correlationId)
     }
 
+    override fun performHealthCheck(): Mono<HealthStatus> {
+        return paymentRepository.count() // Exemplo: checa se consegue fazer uma contagem no banco
+            .map { HealthStatus(true, mapOf("database_status" to "ok", "payment_count" to it)) }
+            .onErrorResume { Mono.just(HealthStatus(false, mapOf("database_status" to "error"))) }
+    }
+
     override fun testPersistence(): Mono<Void> {
-        return Mono.empty()
+        val testPayment = Payment.newPending("test-${Instant.now()}", 1L)
+        return paymentRepository.save(testPayment).then()
     }
 }
