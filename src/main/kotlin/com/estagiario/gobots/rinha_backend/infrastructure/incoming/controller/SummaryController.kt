@@ -3,6 +3,7 @@ package com.estagiario.gobots.rinha_backend.infrastructure.incoming.controller
 import com.estagiario.gobots.rinha_backend.application.service.SummaryService
 import com.estagiario.gobots.rinha_backend.domain.exception.InvalidDateRangeException
 import com.estagiario.gobots.rinha_backend.infrastructure.incoming.dto.PaymentSummaryResponse
+import com.estagiario.gobots.rinha_backend.infrastructure.incoming.dto.ProcessorSummary
 import mu.KotlinLogging
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.GetMapping
@@ -25,11 +26,28 @@ class SummaryController(
         @RequestParam("from") from: Instant,
         @RequestParam("to") to: Instant
     ): Mono<ResponseEntity<PaymentSummaryResponse>> {
-        return summaryService.getPaymentsSummary(from, to) // ✅ CORRIGIDO: usa o nome de método correto
-            .map { summary -> // ✅ TIPO EXPLÍCITO
-                ResponseEntity.ok(summary)
+
+        // Validação de range
+        if (from.isAfter(to)) {
+            return Mono.just(ResponseEntity.badRequest().build())
+        }
+
+        return summaryService.compute(from, to)
+            .map { summary ->
+                // Converte DTO de aplicação para DTO de resposta
+                val response = PaymentSummaryResponse(
+                    defaultProcessor = ProcessorSummary(
+                        totalRequests = summary.default.totalRequests,
+                        totalAmount = summary.default.totalAmount
+                    ),
+                    fallbackProcessor = ProcessorSummary(
+                        totalRequests = summary.fallback.totalRequests,
+                        totalAmount = summary.fallback.totalAmount
+                    )
+                )
+                ResponseEntity.ok(response)
             }
-            .onErrorResume { error: Throwable -> // ✅ TIPO EXPLÍCITO
+            .onErrorResume { error: Throwable ->
                 when (error) {
                     is InvalidDateRangeException -> {
                         logger.warn(error) { "Invalid date range provided" }

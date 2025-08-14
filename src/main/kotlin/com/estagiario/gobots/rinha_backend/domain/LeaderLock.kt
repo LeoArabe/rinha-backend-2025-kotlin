@@ -7,7 +7,11 @@ import java.time.Instant
 @Document("leader_locks")
 data class LeaderLock(
     @Id
-    val key: String,
-    var owner: String,
-    var expireAt: Instant
-)
+    val key: String, // "health-check-leader"
+    val owner: String, // instance-id
+    val expireAt: Instant
+) {
+    fun isExpired(): Boolean = Instant.now().isAfter(expireAt)
+
+    fun isOwnedBy(instanceId: String): Boolean = owner == instanceId
+}

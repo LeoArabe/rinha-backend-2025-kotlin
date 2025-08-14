@@ -1,8 +1,9 @@
 package com.estagiario.gobots.rinha_backend.infrastructure.incoming.controller
 
+import com.estagiario.gobots.rinha_backend.application.dto.PaymentRequest
 import com.estagiario.gobots.rinha_backend.application.service.PaymentService
 import com.estagiario.gobots.rinha_backend.domain.exception.PaymentProcessingException
-import com.estagiario.gobots.rinha_backend.infrastructure.incoming.dto.PaymentRequest
+import com.estagiario.gobots.rinha_backend.infrastructure.incoming.dto.PaymentRequest as IncomingPaymentRequest
 import com.estagiario.gobots.rinha_backend.infrastructure.incoming.dto.PaymentStatusResponse
 import jakarta.validation.Valid
 import mu.KotlinLogging
@@ -20,13 +21,18 @@ class PaymentController(
 ) {
 
     @PostMapping
-    fun createPayment(@Valid @RequestBody request: PaymentRequest): Mono<ResponseEntity<Map<String, String>>> {
-        val correlationId = UUID.randomUUID().toString()
-        val requestWithId = request.copy(correlationId = correlationId)
+    fun createPayment(@Valid @RequestBody request: IncomingPaymentRequest): Mono<ResponseEntity<Map<String, String>>> {
+        val correlationId = UUID.randomUUID()
 
-        return paymentService.processNewPayment(requestWithId)
+        // Converte DTO de entrada para DTO de aplicação
+        val appRequest = PaymentRequest(
+            correlationId = correlationId,
+            amount = request.amount
+        )
+
+        return paymentService.processNewPayment(appRequest)
             .map {
-                ResponseEntity.accepted().body(mapOf("correlationId" to correlationId))
+                ResponseEntity.accepted().body(mapOf("correlationId" to correlationId.toString()))
             }
             .doOnSuccess {
                 logger.info { "message=\"Pagamento aceito com sucesso\" correlationId=$correlationId" }
@@ -50,7 +56,6 @@ class PaymentController(
         return paymentService.performHealthCheck()
             .map { health ->
                 if (health.isHealthy) {
-                    // ✅ CORREÇÃO: Adiciona a tipagem explícita <Any> ao body
                     ResponseEntity.ok().body<Any>(health.details)
                 } else {
                     ResponseEntity.status(503).body<Any>(health.details)
