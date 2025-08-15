@@ -8,65 +8,45 @@ import java.time.Instant
 
 @Document("payments")
 data class Payment(
-    @Id
-    val id: String? = null,
-
-    @Indexed(unique = true)
-    val correlationId: String,
-
-    val amount: Long, // em centavos
+    @Id val id: String? = null,
+    @Indexed(unique = true) val correlationId: String,
+    val amount: Long, // Em centavos
     val status: PaymentStatus,
     val requestedAt: Instant,
     val lastUpdatedAt: Instant,
-
     val processorUsed: String? = null,
-    val lastErrorMessage: String? = null,
-    val attemptCount: Int = 0,
-    val nextRetryAt: Instant? = null
+    val lastErrorMessage: String? = null
 ) {
     companion object {
-        fun newPayment(correlationId: String, amountInCents: Long): Payment {
+        fun newPending(correlationId: String, amountCents: Long): Payment {
             val now = Instant.now()
             return Payment(
                 correlationId = correlationId,
-                amount = amountInCents,
-                status = PaymentStatus.RECEIVED,
+                amount = amountCents,
+                status = PaymentStatus.PROCESSING,
                 requestedAt = now,
                 lastUpdatedAt = now
             )
         }
     }
 
-    val createdAt: Instant get() = requestedAt
-
-    fun toBigDecimal(): BigDecimal =
-        BigDecimal.valueOf(amount, 2)
-
-    fun markAsProcessing(processor: String): Payment =
-        this.copy(
-            status = PaymentStatus.PROCESSING,
-            processorUsed = processor,
-            lastUpdatedAt = Instant.now()
-        )
-
-    fun markAsFailed(message: String?): Payment =
-        this.copy(
-            status = PaymentStatus.FAILURE,
-            lastErrorMessage = message,
-            lastUpdatedAt = Instant.now()
-        )
-
-    fun markAsSuccess(processor: String): Payment =
-        this.copy(
+    fun markAsSuccessful(processor: String): Payment {
+        return this.copy(
             status = PaymentStatus.SUCCESS,
             processorUsed = processor,
-            lastUpdatedAt = Instant.now()
+            lastUpdatedAt = Instant.now(),
+            lastErrorMessage = null
         )
+    }
 
-    fun incrementAttempts(nextRetry: Instant?): Payment =
-        this.copy(
-            attemptCount = attemptCount + 1,
-            nextRetryAt = nextRetry,
+    fun markAsFailed(error: String?): Payment {
+        return this.copy(
+            status = PaymentStatus.FAILURE,
+            lastErrorMessage = error,
+            processorUsed = "none",
             lastUpdatedAt = Instant.now()
         )
+    }
+
+    fun toBigDecimal(): BigDecimal = BigDecimal.valueOf(amount, 2)
 }

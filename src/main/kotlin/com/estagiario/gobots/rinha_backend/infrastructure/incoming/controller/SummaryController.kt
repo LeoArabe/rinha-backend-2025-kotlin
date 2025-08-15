@@ -1,5 +1,6 @@
 package com.estagiario.gobots.rinha_backend.infrastructure.incoming.controller
 
+import com.estagiario.gobots.rinha_backend.application.dto.PaymentsSummary // Corrigido para DTO da aplicação
 import com.estagiario.gobots.rinha_backend.application.service.SummaryService
 import com.estagiario.gobots.rinha_backend.domain.exception.InvalidDateRangeException
 import com.estagiario.gobots.rinha_backend.infrastructure.incoming.dto.PaymentSummaryResponse
@@ -26,13 +27,10 @@ class SummaryController(
         @RequestParam("from") from: Instant,
         @RequestParam("to") to: Instant
     ): Mono<ResponseEntity<PaymentSummaryResponse>> {
-        if (from.isAfter(to)) {
-            return Mono.just(ResponseEntity.badRequest().build())
-        }
-
         return summaryService.compute(from, to)
-            .map { summary ->
+            .map { summary: PaymentsSummary -> // Adicionada tipagem explícita
                 ResponseEntity.ok(
+                    // Mapeamento do DTO de domínio para o DTO de infra
                     PaymentSummaryResponse(
                         defaultProcessor = ProcessorSummary(
                             totalRequests = summary.default.totalRequests,
@@ -45,7 +43,7 @@ class SummaryController(
                     )
                 )
             }
-            .onErrorResume { error ->
+            .onErrorResume { error: Throwable -> // Adicionada tipagem explícita
                 when (error) {
                     is InvalidDateRangeException -> {
                         logger.warn(error) { "Invalid date range provided" }

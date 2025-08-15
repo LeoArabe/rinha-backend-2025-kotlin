@@ -24,14 +24,8 @@ class HealthCheckService(
     @Value("\${app.health-check.timeout-seconds:3}") private val requestTimeoutSeconds: Long
 ) {
 
-    /**
-     * Orquestra a verificação de saúde dos processadores.
-     * Pode ser chamado de forma agendada.
-     */
     fun monitorProcessors(): Mono<Void> {
         val now = Instant.now()
-
-        // Verifica se um "touch" (operação barata) é suficiente.
         return healthUpdater.findAll()
             .collectList()
             .flatMap { currentStatusList ->
@@ -45,15 +39,13 @@ class HealthCheckService(
                         fallbackStatus.lastCheckedAt.isAfter(now.minusSeconds(touchThresholdSeconds))
 
                 if (canTouch) {
-                    // Operação barata: apenas atualiza o timestamp no banco.
                     val touchDefault = healthUpdater.save(defaultStatus!!.touch(instanceId))
                     val touchFallback = healthUpdater.save(fallbackStatus!!.touch(instanceId))
-                    Mono.when(touchDefault, touchFallback)
+                    Mono.`when`(touchDefault, touchFallback)
                 } else {
-                    // Operação completa: faz chamadas HTTP para verificar a saúde.
                     val checkDefault = performFullCheck("default", defaultHealthClient)
                     val checkFallback = performFullCheck("fallback", fallbackHealthClient)
-                    Mono.when(checkDefault, checkFallback)
+                    Mono.`when`(checkDefault, checkFallback)
                 }
             }
     }
@@ -70,17 +62,17 @@ class HealthCheckService(
                     checkedBy = instanceId
                 )
             }
-            .onErrorResume { error ->
+            .onErrorResume { error: Throwable ->
                 logger.warn(error) { "Health check call failed for processor '$processorName'" }
                 Mono.just(
                     ProcessorHealth.newStatus(
                         processor = processorName,
                         state = HealthCheckState.UNHEALTHY,
-                        latencyMs = null, // Latência desconhecida em caso de erro
+                        latencyMs = null,
                         checkedBy = instanceId
                     )
                 )
             }
-            .flatMap { newHealthStatus -> healthUpdater.save(newHealthStatus) }
+            .flatMap(healthUpdater::save)
     }
 }

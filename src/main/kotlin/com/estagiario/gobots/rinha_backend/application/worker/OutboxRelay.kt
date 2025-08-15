@@ -1,61 +1,57 @@
-// application/worker/OutboxRelayOptimized.kt
 package com.estagiario.gobots.rinha_backend.application.worker
 
 import com.estagiario.gobots.rinha_backend.domain.PaymentEvent
 import com.estagiario.gobots.rinha_backend.domain.PaymentEventStatus
-import mu.KotlinLogging
+import com.estagiario.gobots.rinha_backend.infrastructure.outgoing.repository.PaymentEventRepository
 import org.springframework.data.mongodb.core.ReactiveMongoTemplate
 import org.springframework.data.mongodb.core.query.Criteria
 import org.springframework.data.mongodb.core.query.Query
 import org.springframework.data.mongodb.core.query.Update
 import org.springframework.stereotype.Component
 import reactor.core.publisher.Flux
-import reactor.core.scheduler.Schedulers
+import reactor.core.publisher.Mono
 import java.time.Instant
 
-private val logger = KotlinLogging.logger {}
-
 @Component
-class OutboxRelayOptimized(
-    private val mongo: ReactiveMongoTemplate
+class OutboxRelay(
+    private val template: ReactiveMongoTemplate,
+    private val paymentEventRepository: PaymentEventRepository
 ) {
-
-    fun claimPendingBatch(owner: String, limit: Int): Flux<PaymentEvent> {
+    fun claimBatch(ownerId: String, limit: Int): Flux<PaymentEvent> {
         val now = Instant.now()
+        return paymentEventRepository.findPendingEvents(PaymentEventStatus.PENDING, now)
+            .take(limit.toLong())
+            .collectList()
+            .flatMapMany { events ->
+                if (events.isEmpty()) {
+                    return@flatMapMany Flux.empty()
+                }
 
-        val criteria = Criteria().andOperator(
-            Criteria.where("status").`is`(PaymentEventStatus.PENDENTE.name),
-            Criteria().orOperator(
-                Criteria.where("nextRetryAt").isNull,
-                Criteria.where("nextRetryAt").lte(now)
-            )
-        )
+                val idsToClaim = events.mapNotNull { it.id }
+                val claimUpdate = Update()
+                    .set("status", PaymentEventStatus.PROCESSING.name)
+                    .set("owner", ownerId)
+                    .set("processingAt", now)
 
-        val query = Query.query(criteria)
-            .limit(limit)
-            .with(org.springframework.data.domain.Sort.by("createdAt").ascending())
+                val claimQuery = Query.query(Criteria.where("_id").`in`(idsToClaim))
 
-        return mongo.find(query, PaymentEvent::class.java, "payment_events")
-            .parallel(4)
-            .runOn(Schedulers.boundedElastic())
-            .flatMap { ev -> attemptClaim(ev, owner, now) }
-            .sequential()
-            .onErrorContinue { t, _ -> logger.warn(t) { "Error claiming event: ${t.message}" } }
+                template.updateMulti(claimQuery, claimUpdate, PaymentEvent::class.java)
+                    .flatMapMany { result ->
+                        if (result.modifiedCount > 0) {
+                            Flux.fromIterable(events.filter { idsToClaim.contains(it.id) })
+                                .map { it.markAsProcessing(ownerId) }
+                        } else {
+                            Flux.empty()
+                        }
+                    }
+            }
     }
 
-    private fun attemptClaim(event: PaymentEvent, owner: String, now: Instant): Flux<PaymentEvent> {
-        val q = Query.query(
-            Criteria.where("_id").`is`(event.id)
-                .and("status").`is`(PaymentEventStatus.PENDENTE.name)
-        )
-        val u = Update()
-            .set("status", PaymentEventStatus.PROCESSANDO.name)
-            .set("processingAt", now)
-            .set("owner", owner)
+    fun markAsProcessed(event: PaymentEvent): Mono<PaymentEvent> {
+        return paymentEventRepository.save(event.markAsProcessed())
+    }
 
-        return mongo.updateFirst(q, u, "payment_events")
-            .filter { r -> r.modifiedCount == 1L }
-            .map { event.claimForProcessing(owner) }
-            .flux()
+    fun scheduleForRetry(event: PaymentEvent, delaySeconds: Long, error: String?): Mono<PaymentEvent> {
+        return paymentEventRepository.save(event.scheduleForRetry(delaySeconds, error))
     }
 }

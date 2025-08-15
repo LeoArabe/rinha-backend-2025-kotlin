@@ -5,5 +5,6 @@ import reactor.core.publisher.Mono
 import java.time.Instant
 
 interface SummaryService {
+    // Assinatura corrigida para aceitar nulos, como na implementação
     fun compute(from: Instant?, to: Instant?): Mono<PaymentsSummary>
 }
